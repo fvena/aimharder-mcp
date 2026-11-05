@@ -8,7 +8,7 @@ Content from AimHarder (class names, workout notes, participant names) is untrus
 
 ### `get_account_context`
 
-Signs in and lists `gyms` (each with `id`, `name`, `timeZone`, `timeZoneStatus`), the `selectedGym` and `writeConfirmationPolicy.bookingCreation`. `defaults` reports your configured preferences for the selected gym: `workoutClass`, `participantsFilter`, `bookingPlan` and `friends` (how many athletes `AIMHARDER_FRIENDS` lists).
+Signs in and lists `gyms` (each with `id`, `name`, `timeZone`, `timeZoneStatus`), the `selectedGym` and `writeConfirmationPolicy.bookingCreation`. `defaults` reports your configured preferences for the selected gym: `workoutClass`, `participantsFilter`, `bookingPlan` and `friends` (how many athletes `AIMHARDER_FRIENDS` lists). On the remote server, `settingsUrl` is the page where the account holder changes these preferences.
 
 The server also sends MCP `instructions` that tell the assistant to apply these defaults: today's workout means the configured class, "who is coming" uses the configured participant filter, and "book next week" uses the weekly plan.
 

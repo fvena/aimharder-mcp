@@ -6,7 +6,7 @@ It takes about 30–45 minutes the first time.
 
 ## What you'll end up with
 
-You'll have your own small server on the internet, at an address like `https://my-aimharder.fly.dev`. Only you can use it. Claude or ChatGPT connect to it and can then:
+You'll have your own small server on the internet, at an address like `https://my-aimharder.fly.dev`. Only you, and the friends you invite, can use it. Claude or ChatGPT connect to it and can then:
 
 - tell you which classes there are and who is booked,
 - show you the day's workout (WOD),
@@ -102,7 +102,7 @@ Generate a long random password, at least 32 characters, with your password mana
 openssl rand -base64 32
 ```
 
-You'll need it in step 7 and whenever you connect Claude or ChatGPT.
+You'll need it in step 7. You won't type it to connect Claude or ChatGPT: there you sign in with your AimHarder account.
 
 ## Step 6. Find your gym ID
 
@@ -174,7 +174,13 @@ Keep `aimharder.env` private, or delete it once everything works: your settings 
 
 ## Step 9. Start your server
 
-Still inside the project folder:
+Still inside the project folder, first create the small disk where your server keeps the people you invite and everyone's settings (1 GB, enough for years):
+
+```sh
+fly volumes create aimharder_data --region ams --size 1 -a ana-aimharder
+```
+
+Use the same region as in `fly.toml` (`ams` unless you changed it). Then start the server:
 
 ```sh
 fly deploy -a ana-aimharder
@@ -196,14 +202,14 @@ If not, see [Troubleshooting](#troubleshooting).
 
 ## Step 10. Connect Claude
 
-You add the connector **once** to your Claude account, and it then works on claude.ai, the desktop app and the mobile app. Do it on [claude.ai](https://claude.ai) in a browser or in the Claude desktop app, where it's easier to paste your owner secret than on the phone:
+You add the connector **once** to your Claude account, and it then works on claude.ai, the desktop app and the mobile app. Do it on [claude.ai](https://claude.ai) in a browser or in the Claude desktop app, where it's easier to type your password than on the phone:
 
 1. Open **Customize → Connectors**.
 2. Click **Add custom connector**.
 3. Enter a name, such as `AimHarder`, and the URL `https://ana-aimharder.fly.dev/mcp`. Note the `/mcp` at the end.
 4. If Claude asks how it should identify itself, choose **Register automatically**.
 5. Click **Add**, then **Connect**.
-6. A page titled **Authorize AimHarder MCP** opens. Type your owner secret and click **Authorize**.
+6. A page titled **Autorizar AimHarder MCP** opens. Type your AimHarder email and password and click **Autorizar**.
 
 The connector now works on claude.ai, in the desktop app and in the **mobile app**, with nothing more to set up on the phone. Sign in to the app with the same Claude account. If the connector doesn't show up on the phone, close the app completely and open it again.
 
@@ -222,7 +228,7 @@ Use the same server URL you used for Claude. You can also start here if you skip
 2. Enter `AimHarder` as the name. Under **Connection**, choose **Server URL** and paste your deployment URL including `/mcp`, for example `https://ana-aimharder.fly.dev/mcp`. Replace `ana-aimharder` with your Fly app name.
 3. Select **OAuth**. If prompted for a registration method, choose **Dynamic Client Registration (DCR)**. Leave **Client ID** and **Client Secret** empty. The server registers ChatGPT automatically.
 4. Review the permissions, select **Create as a plugin**, then **Install**.
-5. Open a new chat, type `@`, select **AimHarder** and ask “Which classes are there tomorrow?” When prompted to authorize, enter your owner secret (`MCP_OWNER_SECRET`) on your own server’s **Authorize AimHarder MCP** page and select **Authorize**.
+5. Open a new chat, type `@`, select **AimHarder** and ask “Which classes are there tomorrow?” When prompted to authorize, sign in with your AimHarder email and password on your own server’s **Autorizar AimHarder MCP** page and select **Autorizar**.
 
 ## Step 12. Try it
 
@@ -238,13 +244,31 @@ Then try a change, such as "Book tomorrow's 14:00 CROSS". The assistant first sh
 
 The first message after a long pause can take a few seconds while your server wakes up.
 
+## Step 13. Change your settings and invite friends (optional)
+
+Open `https://ana-aimharder.fly.dev/settings` and sign in with your AimHarder account. There you can change, without commands:
+
+- your weekly booking plan and the class whose workout you mean by "today's workout",
+- whether "who's in this class?" shows everyone or only the people you follow and your friends,
+- your **friends**: athletes with a private profile, whom you can't follow in AimHarder. Choose **Buscar amigos en una clase**, pick a class you share and tick them.
+
+To let a friend use your server with their own AimHarder account:
+
+1. Open **Administrar** and type their name under **Invitar**. Click **Crear enlace de invitación**.
+2. Send them the link, for example by WhatsApp. It works once and expires after 7 days.
+3. They open it, sign in with their AimHarder account, and get a page with the steps to add the connector to their Claude or ChatGPT. They use the same address, `https://ana-aimharder.fly.dev/mcp`.
+
+Each person only sees and changes their own bookings and settings. Under **Personas con acceso** you can remove someone at any time: their assistants stop working and their password and settings are deleted.
+
+Your friends' AimHarder passwords are stored encrypted on your server, because it needs them to ask AimHarder on their behalf. Invite only people you trust and who trust you.
+
 ---
 
 ## Everyday tasks
 
 ### Change a setting
 
-Use `fly secrets set` with the name and the new value. Your server restarts by itself.
+Your booking plan, workout class, participant filter, friends and your gym's rules can be changed on the settings page (step 13). For everything else, use `fly secrets set` with the name and the new value. Your server restarts by itself.
 
 **macOS or Linux** (single quotes around values with `{ }`):
 
@@ -268,7 +292,7 @@ If you keep your own copy of the project on GitHub (a *fork*), it can deploy its
 
 ### Disconnect every device
 
-Change your owner secret. Every connected Claude or ChatGPT stops working until you connect it again with the new secret.
+Change your owner secret. Every connected Claude or ChatGPT, yours and your friends', stops working until each person connects it again with their AimHarder account.
 
 ```sh
 fly secrets set -a ana-aimharder MCP_OWNER_SECRET=your-new-secret
@@ -310,14 +334,18 @@ Messages starting with `INVALID_…` mean a setting is wrong. The message says w
 | `/healthz` doesn't load | Wait a minute and retry. If it still fails, read `fly logs`. |
 | `fly deploy` fails while "Building image" | Fly's build service had a problem. Retry later. If you have [Docker Desktop](https://www.docker.com/products/docker-desktop/) running, `fly deploy -a ana-aimharder --local-only` builds on your computer instead. |
 | `Error: … missing an app name` | Add `-a ana-aimharder` to the command, or run it inside the project folder. |
-| The authorize page says **Wrong owner secret** | Copy the secret again from your password manager, with no spaces at either end. |
-| **Too many failed attempts** | Wait 15 minutes and try again. |
+| The authorize page says the email or password **no son correctos** | Use the same email and password as in the AimHarder app. |
+| The authorize page says the account **no tiene acceso** | That AimHarder account hasn't been invited. Send it an invitation from **Administrar** (step 13). |
+| `fly deploy` says a machine **does not have a volume configured** | Create the volume (step 9). If it still fails, run `fly scale count 0 -a ana-aimharder`, then `fly deploy -a ana-aimharder` again. |
+| **Demasiados intentos fallidos** | Wait 15 minutes and try again. |
 | ChatGPT rejects the plugin settings | Check that **Server URL** uses your own HTTPS address ending in `/mcp` and authentication is **OAuth** with dynamic registration. The server already accepts ChatGPT’s callback URLs. |
 | `AUTHENTICATION_FAILED` when you ask something | AimHarder rejected the email or password. Fix them with `fly secrets set`. |
+| A friend gets `AUTHENTICATION_FAILED` after changing their AimHarder password | They sign in once at `https://ana-aimharder.fly.dev/settings` with the new password; the server updates it. |
 | Booking says a time zone is required | Add `AIMHARDER_GYM_TIME_ZONES` (step 7). |
 
 ## Security in short
 
-- Your owner secret is the key to your server. Anyone who has it can connect an assistant that acts on your AimHarder account. Keep it in a password manager and change it if you think someone has seen it.
-- Your AimHarder password lives only in Fly's encrypted settings and in your server's memory. It never appears in answers, errors or logs.
+- Your owner secret is the key to your server: it signs every connection and encrypts your friends' passwords. Keep it in a password manager and change it if you think someone has seen it.
+- Connecting an assistant, or opening the settings page, needs a valid AimHarder email and password of you or someone you invited.
+- Your AimHarder password lives only in Fly's encrypted settings and in your server's memory. Your friends' passwords are stored encrypted on your server's disk. They never appear in answers, errors or logs.
 - Class names, workout notes and other members' names come from AimHarder. The assistant treats them as data, never as instructions. Other members' names are personal data: use them only for yourself.

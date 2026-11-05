@@ -1,6 +1,6 @@
 # Configuration
 
-The server serves one AimHarder account, locally over stdio (default) or remotely over HTTP with OAuth ([remote use](remote.md)). It reads its settings from the process environment; it does not load files by itself. Keep credentials in a private file (`chmod 600`) outside the repository and pass it with `node --env-file=…`, or let your MCP client inject the variables.
+Locally over stdio (default), the server serves one AimHarder account. Remotely over HTTP with OAuth ([remote use](remote.md)), it serves that account, its *owner*, plus the people the owner invites, each with their own AimHarder account. It reads its settings from the process environment; it does not load files by itself. Keep credentials in a private file (`chmod 600`) outside the repository and pass it with `node --env-file=…`, or let your MCP client inject the variables.
 
 ## Environment variables
 
@@ -24,12 +24,25 @@ The server serves one AimHarder account, locally over stdio (default) or remotel
 | --- | --- | --- |
 | `MCP_TRANSPORT` | no | `stdio` (default) or `http`. |
 | `MCP_PUBLIC_URL` | with `http` | Public origin, without a path, for example `https://my-aimharder.fly.dev`. HTTPS is required except for `localhost`. The MCP endpoint is `<origin>/mcp`, and requests for other host names are rejected. |
-| `MCP_OWNER_SECRET` | with `http` | Secret, at least 16 characters, typed on the approval page to connect a client. It also derives the token signing key, so changing it disconnects every client. |
+| `MCP_OWNER_SECRET` | with `http` | Secret, at least 16 characters, that nobody types: it derives the key that signs tokens and sessions and the key that encrypts members' stored passwords. Changing it disconnects every client and signs everyone out; members sign in again with their AimHarder account. |
+| `MCP_DATA_DIR` | no | Directory for the SQLite file with members, invitations and settings. Default `data` (relative to the working directory); the Docker image uses `/data`, which must be a persistent volume. |
 | `MCP_HTTP_HOST` | no | Listening address. Default `127.0.0.1`; the Docker image uses `0.0.0.0`. |
 | `PORT` | no | Listening port, 1–65535. Default `3000`; the Docker image uses `8080`. |
 | `MCP_OAUTH_REDIRECT_URIS` | no | Extra OAuth redirect URIs, comma-separated (HTTPS, or HTTP on loopback). Claude's and ChatGPT's callbacks and loopback URIs are always accepted. |
 
 Invalid values stop the server at startup with a specific error code (for example `INVALID_TIME_ZONE_CONFIGURATION` or `INVALID_HTTP_CONFIGURATION`), before any request is sent.
+
+### Settings page (HTTP only)
+
+On the remote server, each account edits its own preferences at `<MCP_PUBLIC_URL>/settings`, and the owner edits the gym rules at `/admin`. They are stored in `MCP_DATA_DIR` and override the environment:
+
+| Layer | Who edits it | Settings |
+| --- | --- | --- |
+| Environment | owner, with platform secrets | everything above |
+| Gym rules | owner, at `/admin` | time zone, booking window and cancellation window, per gym |
+| Own preferences | each account, at `/settings` | default gym, workout class, participant filter, weekly booking plan, friends |
+
+Per-gym values merge by gym ID, so an empty field falls back to the environment. Members inherit the environment's gym rules and workout class, but not the owner's default gym, booking plan, participant filter or friends, and always confirm bookings (`AIMHARDER_REQUIRE_BOOKING_CONFIRMATION` applies to the owner only). Credentials, secrets, URLs and the redirect allowlist stay environment-only.
 
 The booking and cancellation windows are the rules your gym states. They prevent premature or unexpected requests, but AimHarder still decides whether a booking or cancellation is accepted.
 
