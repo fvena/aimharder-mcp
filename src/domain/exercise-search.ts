@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { gymIdSchema } from './config.js';
+import { gymIdSchema } from '../config.js';
 import { exerciseIdSchema, exercise1RMResultSchema } from './exercise-records.js';
 
 export const exerciseSearchQuerySchema = z.object({ name: z.string().trim().min(1).max(100), exerciseId: exerciseIdSchema.optional(), gymId: gymIdSchema.optional() }).strict();

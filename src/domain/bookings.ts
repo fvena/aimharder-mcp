@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { dateSchema, timeSchema } from './classes.js';
-import { AimHarderError } from './errors.js';
+import { AimHarderError } from '../errors.js';
 
 const sourceId = z.number().int().positive().safe();
 export const upcomingBookingSchema = z.object({

@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { gymIdSchema } from './config.js';
-import { AimHarderError } from './errors.js';
+import { gymIdSchema } from '../config.js';
+import { AimHarderError } from '../errors.js';
 
 // Calendar arithmetic uses UTC only as a Gregorian date counter, never as the gym zone.
 export const dateSchema = z.iso.date().refine((date) => !date.startsWith('0000'));

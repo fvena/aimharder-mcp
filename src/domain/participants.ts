@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { dateSchema, timeSchema } from './classes.js';
-import { gymIdSchema } from './config.js';
-import { AimHarderError } from './errors.js';
+import { gymIdSchema } from '../config.js';
+import { AimHarderError } from '../errors.js';
 
 export const participantsQuerySchema = z.object({
   date: dateSchema, className: z.string().trim().min(1).max(300), startTime: timeSchema, gymId: gymIdSchema.optional(),

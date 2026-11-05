@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { dateSchema } from './classes.js';
-import { gymIdSchema } from './config.js';
+import { gymIdSchema } from '../config.js';
 import { exerciseIdSchema } from './exercise-records.js';
 
 // Recording a strength result (sets × repetitions at a load), as the AimHarder app does it.

@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { dateSchema, parseClassDay, timeSchema } from './classes.js';
-import { gymIdSchema } from './config.js';
+import { gymIdSchema } from '../config.js';
 
 export const bookingCreationQuerySchema = z.object({
   gymId: gymIdSchema.optional(), date: dateSchema,

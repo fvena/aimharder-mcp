@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { dateSchema } from './classes.js';
-import { gymIdSchema } from './config.js';
-import { AimHarderError } from './errors.js';
+import { gymIdSchema } from '../config.js';
+import { AimHarderError } from '../errors.js';
 import { parseWorkout, workoutSchema } from './workouts.js';
 
 export const activityQuerySchema = z.object({ startDate: dateSchema, endDate: dateSchema, gymId: gymIdSchema.optional() }).strict()

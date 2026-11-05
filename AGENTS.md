@@ -4,11 +4,12 @@ A local TypeScript MCP server for one AimHarder account, run over stdio. Write c
 
 ## Layout
 
-- `src/server.ts`: MCP tool registration, input/output schemas and error mapping.
-- `src/client.ts`: the AimHarder client. Sessions, gym selection, every query and write flow.
-- `src/app-api.ts`: mobile app API session (token login and renewal).
-- Domain modules parse and validate upstream responses: `classes`, `bookings`, `booking-preparation`, `workouts`, `activity`, `participants`, `exercise-*`, `calculated-loads`.
-- `tests/`: Vitest suites that drive the server through an in-memory MCP client against msw-simulated upstream responses. `tests/support/` holds shared simulators.
+- `src/server.ts`: MCP tool registration, input/output schemas and safe error results. It calls the features.
+- `src/features/`: what each tool does, as functions of a `Context` (`context.ts`: AimHarder access, configuration, single-use preview stores). One module per area: `account`, `schedule`, `bookings`, `workouts`, `records`, `activity`.
+- `src/upstream.ts`: the only module that talks to AimHarder. `withGym(gymId, work)` gives a query its selected gym and `read`/`write`/`publisher` operations named by domain meaning. It hides the web and app sessions, which API serves each operation, session renewal for reads, no replay for writes, and the same-account check. `app-api.ts` (app token session) and `http.ts` (bounded response reading) serve it.
+- `src/domain/`: schemas and parsers that validate and project upstream responses (classes, bookings, workouts, activity, exercises, participants, results).
+- `src/config.ts`, `src/errors.ts`: environment configuration and public error codes.
+- `tests/`: Vitest suites that drive the server through an in-memory MCP client against msw-simulated upstream responses; `tests/support/` holds shared simulators. Test through the MCP interface, not internals.
 - `docs/`: user documentation and the observed upstream contract (`aimharder-api.md`).
 
 ## Rules

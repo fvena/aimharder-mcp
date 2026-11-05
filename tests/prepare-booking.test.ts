@@ -5,7 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createServer } from '../src/server.js';
 import { appBase, appLogin } from './support/app-api.js';
-import { BookingPreparationStore, bookingWindow, type BookingCreationPreview } from '../src/booking-preparation.js';
+import { BookingPreparationStore, bookingWindow, type BookingCreationPreview } from '../src/domain/booking-preparation.js';
 
 const upstream = setupServer();
 const connections: { client: Client; server: ReturnType<typeof createServer> }[] = [];

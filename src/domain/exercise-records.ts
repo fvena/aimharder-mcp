@@ -1,6 +1,6 @@
 import { z } from 'zod';
-import { gymIdSchema } from './config.js';
-import { AimHarderError } from './errors.js';
+import { gymIdSchema } from '../config.js';
+import { AimHarderError } from '../errors.js';
 
 export const exerciseIdSchema = z.number().int().positive().safe();
 export const exercise1RMQuerySchema = z.object({ exerciseId: exerciseIdSchema, gymId: gymIdSchema.optional() }).strict();
