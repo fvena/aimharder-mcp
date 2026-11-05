@@ -1,11 +1,20 @@
 # Fly.io configuration for one personal aimharder-mcp instance. See docs/remote.md.
 # Secrets (AimHarder login, MCP_PUBLIC_URL, MCP_OWNER_SECRET, optional AIMHARDER_*) are set with `fly secrets`.
-# Run exactly one machine: sessions and preview references live in memory.
+# Run exactly one machine: sessions and preview references live in memory, and members, invitations and settings
+# live in one SQLite file on the volume. Create the volume once before the first deploy:
+#   fly volumes create aimharder_data --region ams --size 1
 
 app = 'aimharder-mcp'
 primary_region = 'ams'
 
 [build]
+
+[env]
+  MCP_DATA_DIR = '/data'
+
+[mounts]
+  source = 'aimharder_data'
+  destination = '/data'
 
 [http_service]
   internal_port = 8080
