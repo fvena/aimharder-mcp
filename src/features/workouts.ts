@@ -26,6 +26,18 @@ const workoutNotices = [
   'For today and future gym-local dates, eligible %RM values use the latest dated own-account 1RM of the exact source exercise. This is a product calculation, not a verified AimHarder rule. Original prescriptions remain unchanged; no unit conversion or plate rounding is applied. Record gym of origin is unverified.',
 ];
 
+const classRequiredNotice = 'No className was given and none is configured for this gym (AIMHARDER_WORKOUT_CLASS). Ask the account holder which class they mean, offering the published class names; no workout details were read.';
+const classSourceNotice = (source: 'request' | 'configured') => source === 'configured'
+  ? 'className is the class configured for this gym. When the account holder asks for another class, query again with that exact className from the published class names.'
+  : 'className was requested explicitly. If it is not among the published class names, suggest the closest published name instead of reporting no workout.';
+
+/** The workout class to read: the requested one, else the gym's configured default, else none. */
+function resolveWorkoutClass(ctx: Context, gymId: string, requested: string | undefined) {
+  if (requested !== undefined) return { className: requested, classSource: 'request' as const };
+  const configured = ctx.config.workoutClasses && Object.hasOwn(ctx.config.workoutClasses, gymId) ? ctx.config.workoutClasses[gymId]! : null;
+  return { className: configured, classSource: configured === null ? null : 'configured' as const };
+}
+
 function hasWorkoutContent(workout: NonNullable<ReturnType<typeof parseWorkout>>) {
   return workout.exercises.length > 0 || workout.blocks.some(block => block.notes?.trim()) || workout.variants.some(variant => variant.exercises.length || variant.blocks.some(block => block.notes?.trim()));
 }
@@ -37,16 +49,17 @@ export function getPublishedWorkouts(ctx: Context, input: WorkoutQuery) {
   return ctx.upstream.withGym(query.gymId, async (session) => {
     const { gym } = session;
     if (!gym.timeZone) throw new AimHarderError('GYM_TIME_ZONE_REQUIRED');
+    const { className, classSource } = resolveWorkoutClass(ctx, gym.id, query.className);
     const publisher = await session.publisher();
-    const day = await dayWorkouts(session, gym.timeZone, publisher, query.date, query.className);
+    const day = await dayWorkouts(session, gym.timeZone, publisher, query.date, className);
     const { workouts: enrichedWorkouts, enrichment } = await enrichWorkouts(session, day.workouts);
     return {
-      gym, date: query.date, className: query.className,
-      status: day.workouts.length ? 'available' as const : day.unsupported ? 'unsupported' as const : 'unavailable' as const,
+      gym, date: query.date, className, classSource, classNamesAvailable: [...day.classNames].sort(),
+      status: className === null ? 'class-required' as const : day.workouts.length ? 'available' as const : day.unsupported ? 'unsupported' as const : 'unavailable' as const,
       ambiguous: day.workouts.length > 1, workouts: enrichedWorkouts,
       enrichment,
       coverage: { status: 'complete' as const, scope: 'upstream-day-workouts' as const, interpretation: day.unsupported ? 'unsupported' as const : 'verified' as const },
-      notices: [dayWorkoutsNotice, ...workoutNotices],
+      notices: [classSource === null ? classRequiredNotice : classSourceNotice(classSource), dayWorkoutsNotice, ...workoutNotices],
     };
   });
 }
@@ -59,13 +72,14 @@ export function getPublishedWorkoutsRange(ctx: Context, input: WorkoutRangeQuery
   return ctx.upstream.withGym(query.gymId, async (session) => {
     const { gym } = session;
     if (!gym.timeZone) throw new AimHarderError('GYM_TIME_ZONE_REQUIRED');
+    const { className, classSource } = resolveWorkoutClass(ctx, gym.id, query.className);
     const publisher = await session.publisher();
     const dates = datesInRange(query.from, query.to);
     const classNames = new Set<string>();
     const workouts = [];
     let unsupported = false;
     for (const date of dates) {
-      const day = await dayWorkouts(session, gym.timeZone, publisher, date, query.className);
+      const day = await dayWorkouts(session, gym.timeZone, publisher, date, className);
       day.classNames.forEach(name => classNames.add(name));
       workouts.push(...day.workouts);
       unsupported ||= day.unsupported;
@@ -73,20 +87,20 @@ export function getPublishedWorkoutsRange(ctx: Context, input: WorkoutRangeQuery
     const { workouts: enrichedWorkouts, enrichment } = await enrichWorkouts(session, workouts);
     const days = dates.map(date => {
       const dayWorkouts = enrichedWorkouts.filter(workout => workout.date === date);
-      return { date, status: dayWorkouts.length ? 'available' as const : 'unavailable' as const, ambiguous: dayWorkouts.length > 1, workouts: dayWorkouts };
+      return { date, status: className === null ? 'class-required' as const : dayWorkouts.length ? 'available' as const : 'unavailable' as const, ambiguous: dayWorkouts.length > 1, workouts: dayWorkouts };
     });
     return {
-      gym, from: query.from, to: query.to, className: query.className,
+      gym, from: query.from, to: query.to, className, classSource,
       days, classNamesInRange: [...classNames].sort(), enrichment,
       coverage: { status: 'complete' as const, scope: 'upstream-day-workouts' as const, daysRead: dates.length, interpretation: unsupported ? 'unsupported' as const : 'verified' as const },
-      notices: [dayWorkoutsNotice, ...workoutNotices],
+      notices: [classSource === null ? classRequiredNotice : classSourceNotice(classSource), dayWorkoutsNotice, ...workoutNotices],
     };
   });
 }
 
 
-/** One day's published workouts of one class, through the app's day-workout list and workout details. */
-async function dayWorkouts(session: GymSession, timeZone: string, publisher: number, date: string, className: string) {
+/** One day's published workouts of one class, through the app's day-workout list and workout details. Without a class, only the class names are read. */
+async function dayWorkouts(session: GymSession, timeZone: string, publisher: number, date: string, className: string | null) {
   const gymId = session.gym.id;
   const posts = parseDayWorkouts(await session.read({ kind: 'day-workouts', publisher, date }));
   const classNames = new Set<string>();

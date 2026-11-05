@@ -34,7 +34,7 @@ Any platform that runs a container behind HTTPS works. The [Dockerfile](../Docke
 | `AIMHARDER_USERNAME`, `AIMHARDER_PASSWORD` | Your AimHarder login |
 | `MCP_PUBLIC_URL` | The HTTPS origin the platform gives you, without a path, for example `https://my-aimharder.fly.dev` |
 | `MCP_OWNER_SECRET` | The secret from step 1 |
-| Optional `AIMHARDER_*` settings | Gym, time zones and windows, as in [configuration](configuration.md) |
+| Optional `AIMHARDER_*` settings | Gym, time zones, windows, workout class and booking plan, as in [configuration](configuration.md) |
 
 The platform's own subdomain is enough; you don't need a domain of your own. Keep the instance count at one, and use a region close to you.
 

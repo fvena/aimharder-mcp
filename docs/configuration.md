@@ -14,6 +14,8 @@ The server serves one AimHarder account, locally over stdio (default) or remotel
 | `AIMHARDER_CANCELLATION_WINDOW_MINUTES` | no | JSON object from gym ID to minutes (1–10080). Cancelling within that many minutes of the class may lose a credit. Cancellation previews warn inside the window, and a preview prepared before the window opened becomes `stale`. |
 | `AIMHARDER_REQUIRE_BOOKING_CONFIRMATION` | no | `true` (default) or `false`. With `false`, an explicit request to book an exact class is enough to execute its preview. Cancellations and saving or deleting results always require confirmation. |
 | `AIMHARDER_PARTICIPANTS_FILTER` | no | `all` (default) or `following`. Default for `get_class_participants`: everyone in the class, or only the athletes you follow in AimHarder. Each call can still choose with `filter`. Follow or unfollow athletes in the AimHarder app. |
+| `AIMHARDER_WORKOUT_CLASS` | no | JSON object from gym ID to the exact workout class name in the gym feed, for example `{"undergroundrv":"CROSS"}`. The workout tools use it when a call has no `className`, so "what is today's workout?" needs no class. Naming another class (for example HYROX) still works. Without it, those calls return `class-required` with the published class names. |
+| `AIMHARDER_BOOKING_PLAN` | no | JSON object from gym ID to a weekly plan: weekday keys `mon`–`sun`, each with an exact `className` and `startTime` (`HH:mm`), for example `{"undergroundrv":{"mon":{"className":"CROSS","startTime":"07:00"}}}`. `prepare_planned_bookings` previews these classes for a date range, so "book next week" needs no class list. Each booking is still previewed and executed separately. |
 
 ### Remote (HTTP) transport
 

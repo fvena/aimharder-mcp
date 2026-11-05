@@ -2,8 +2,10 @@ import { z } from 'zod';
 import { AimHarderError } from '../errors.js';
 import { type GymSession } from '../upstream.js';
 import { parseUpcomingBookings, parseBookingHistory } from '../domain/bookings.js';
-import { insideCancellationWindow, bookingCandidates, bookingWindow, bookingCreationQuerySchema, bookingCancellationQuerySchema, bookingExecutionSchema, lateCancellationExecutionSchema, cancellationCandidates, type BookingCreationQuery, type BookingCreationPreview, type BookingCancellationQuery, type BookingCancellationPreview, type BookingExecution, type LateCancellationExecution } from '../domain/booking-preparation.js';
+import { insideCancellationWindow, bookingCandidates, bookingWindow, bookingCreationQuerySchema, bookingCancellationQuerySchema, bookingExecutionSchema, lateCancellationExecutionSchema, cancellationCandidates, plannedBookingQuerySchema, type PlannedBookingQuery, type BookingCreationQuery, type BookingCreationPreview, type BookingCancellationQuery, type BookingCancellationPreview, type BookingExecution, type LateCancellationExecution } from '../domain/booking-preparation.js';
 import { gymRule, requireWriteConfirmation, type Context } from './context.js';
+import { calendarDates } from '../domain/classes.js';
+import { weekdays } from '../config.js';
 
 function bookingResponseDenied(response:unknown):boolean {
   const denial=z.object({bookState:z.number().int().negative().optional(),errorMssg:z.unknown().optional(),errorMssgLang:z.unknown().optional()}).safeParse(response);
@@ -18,33 +20,76 @@ export function prepareBookingCreation(ctx: Context, input: BookingCreationQuery
     const { gym, boxId } = session;
     if (gym.timeZoneStatus !== 'user-confirmed' || !gym.timeZone) throw new AimHarderError('CONFIRMED_GYM_TIME_ZONE_REQUIRED');
     if (boxId === undefined) throw new AimHarderError('INVALID_CLASS_RESPONSE');
-    const body = await session.read({ kind: 'schedule', boxId, date: query.date });
-    const candidates = bookingCandidates(body, gym.id, query.date, gym.timeZone, query);
-    const alternatives = candidates.map(({ sourceId: _sourceId, ...candidate }) => candidate);
-    const base = { action: 'create' as const, gym, target: {
-      className: query.className, date: query.date, startTime: query.startTime, endTime: query.endTime,
-    }, alternatives };
-    if (candidates.length !== 1) return { ...base, status: candidates.length ? 'ambiguous' as const : 'missing' as const,
-      notices: [candidates.length ? 'Several exact class sessions match. Choose a different date or time; no booking can be prepared.' : 'No exact class session was found in the retrieved daily schedule.'] };
-    const candidate = candidates[0]!;
-    const windowDays = gymRule(ctx.config.bookingWindowDays, gym.id);
-    const window = windowDays === undefined ? undefined : bookingWindow(query.date, query.startTime, gym.timeZone, windowDays);
-    if (window && !window.bookingOpen && candidate.currentState === 'unbooked') return { ...base, status: 'not-yet-open' as const, currentState: candidate.currentState, bookingOpensAt: window.bookingOpensAt,
-      notices: [`Booking for this class opens at ${window.bookingOpensAt.replace('T', ' ')} gym-local time under the configured ${windowDays}-day booking window. No reference was issued and no request was sent. Do not retry before then.`] };
-    const status = candidate.currentState === 'booked' ? 'already-booked' as const
-      : candidate.currentState === 'waitlisted' ? 'waitlisted' as const
-        : candidate.eligibility === 'offered' ? 'ready' as const : 'unsupported' as const;
-    const notices = [
-      'This is a read-only schedule snapshot. Preparation does not reserve a place or prove final eligibility.',
-    ];
-    if (status !== 'ready') return { ...base, status, currentState: candidate.currentState, notices };
-    const preview: BookingCreationPreview = {
-      action: 'create', gym: { ...gym, timeZone: gym.timeZone, timeZoneStatus: 'user-confirmed' },
-      target: base.target, currentState: 'unbooked',
-      notices,
-    };
-    return { status, ...preview, alternatives, ...ctx.bookingPreparations.issue(session.accountId, boxId, candidate.sourceId, preview) };
+    return prepareOneBooking(ctx, session, boxId, gym.timeZone, query);
   }).then(result => ({ ...result, writeConfirmationRequired: ctx.config.requireBookingConfirmation !== false }));
+}
+
+
+/**
+ * Preview booking each planned class (AIMHARDER_BOOKING_PLAN) in a date range: one single-use reference per
+ * ready class, each executed separately with execute_booking_creation. Days without a plan entry are listed as not-planned.
+ */
+export function preparePlannedBookings(ctx: Context, input: PlannedBookingQuery) {
+  const parsed = plannedBookingQuerySchema.safeParse(input);
+  if (!parsed.success) return Promise.reject(new AimHarderError('INVALID_PLANNED_BOOKING_QUERY'));
+  const query = parsed.data;
+  return ctx.upstream.withGym(query.gymId, async (session) => {
+    const { gym, boxId } = session;
+    if (gym.timeZoneStatus !== 'user-confirmed' || !gym.timeZone) throw new AimHarderError('CONFIRMED_GYM_TIME_ZONE_REQUIRED');
+    if (boxId === undefined) throw new AimHarderError('INVALID_CLASS_RESPONSE');
+    const plan = ctx.config.bookingPlans && Object.hasOwn(ctx.config.bookingPlans, gym.id) ? ctx.config.bookingPlans[gym.id]! : {};
+    const days = [];
+    for (const date of calendarDates(query.startDate, query.endDate)) {
+      const weekday = weekdays[(new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7]!;
+      const planned = plan[weekday];
+      if (!planned) { days.push({ date, weekday, status: 'not-planned' as const }); continue; }
+      const { gym: _gym, action: _action, ...result } = await prepareOneBooking(ctx, session, boxId, gym.timeZone, { date, ...planned });
+      days.push({ date, weekday, ...result });
+    }
+    const planned = Object.keys(plan).length > 0;
+    return { action: 'create' as const, gym, startDate: query.startDate, endDate: query.endDate, plan, days,
+      writeConfirmationRequired: ctx.config.requireBookingConfirmation !== false,
+      notices: [
+        planned ? 'Each ready day has its own single-use reference that expires in two minutes. Show the whole list, then execute each ready day separately with execute_booking_creation; every execution sends at most one booking request.'
+          : 'No booking plan is configured for this gym (AIMHARDER_BOOKING_PLAN). Ask the account holder which classes to book, or book exact classes with prepare_booking_creation.',
+        'Ask the account holder about days that are not-planned, missing, ambiguous or unsupported instead of choosing another class. For not-yet-open days, report bookingOpensAt and do not retry before then.',
+        'This is a read-only schedule snapshot. Preparation does not reserve a place or prove final eligibility.',
+      ] };
+  });
+}
+
+
+/** Preview one booking in the gym's daily schedule; a missing end time matches any end time (as in a booking plan). */
+async function prepareOneBooking(ctx: Context, session: GymSession, boxId: number, timeZone: string, query: { date: string; className: string; startTime: string; endTime?: string }) {
+  const { gym } = session;
+  const body = await session.read({ kind: 'schedule', boxId, date: query.date });
+  const candidates = bookingCandidates(body, gym.id, query.date, timeZone, query);
+  const alternatives = candidates.map(({ sourceId: _sourceId, ...candidate }) => candidate);
+  const base = { action: 'create' as const, gym, target: {
+    className: query.className, date: query.date, startTime: query.startTime,
+    endTime: query.endTime ?? (candidates.length === 1 ? candidates[0]!.endTime : null),
+  }, alternatives };
+  if (candidates.length !== 1) return { ...base, status: candidates.length ? 'ambiguous' as const : 'missing' as const,
+    notices: [candidates.length ? 'Several exact class sessions match. Choose a different date or time; no booking can be prepared.' : 'No exact class session was found in the retrieved daily schedule.'] };
+  const candidate = candidates[0]!;
+  const target = { ...base.target, endTime: candidate.endTime };
+  const windowDays = gymRule(ctx.config.bookingWindowDays, gym.id);
+  const window = windowDays === undefined ? undefined : bookingWindow(query.date, query.startTime, timeZone, windowDays);
+  if (window && !window.bookingOpen && candidate.currentState === 'unbooked') return { ...base, target, status: 'not-yet-open' as const, currentState: candidate.currentState, bookingOpensAt: window.bookingOpensAt,
+    notices: [`Booking for this class opens at ${window.bookingOpensAt.replace('T', ' ')} gym-local time under the configured ${windowDays}-day booking window. No reference was issued and no request was sent. Do not retry before then.`] };
+  const status = candidate.currentState === 'booked' ? 'already-booked' as const
+    : candidate.currentState === 'waitlisted' ? 'waitlisted' as const
+      : candidate.eligibility === 'offered' ? 'ready' as const : 'unsupported' as const;
+  const notices = [
+    'This is a read-only schedule snapshot. Preparation does not reserve a place or prove final eligibility.',
+  ];
+  if (status !== 'ready') return { ...base, target, status, currentState: candidate.currentState, notices };
+  const preview: BookingCreationPreview = {
+    action: 'create', gym: { ...gym, timeZone, timeZoneStatus: 'user-confirmed' },
+    target, currentState: 'unbooked',
+    notices,
+  };
+  return { status, ...preview, alternatives, ...ctx.bookingPreparations.issue(session.accountId, boxId, candidate.sourceId, preview) };
 }
 
 
