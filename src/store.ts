@@ -9,6 +9,8 @@ import { userSettingsSchema } from './config.js';
 export interface Member { id: number; label: string; generation: string; createdAt: string }
 export interface Invitation { id: string; label: string; expiresAt: string }
 export interface Credentials { username: string; password: string }
+/** An account's calendar feed link; the link itself is shown once and stored only as a digest. */
+export interface CalendarFeed { createdAt: string }
 
 const invitationDays = 7;
 const now = () => new Date().toISOString();
@@ -18,7 +20,8 @@ const now = () => new Date().toISOString();
  *
  * Member passwords are encrypted with AES-256-GCM under a key derived from MCP_OWNER_SECRET, so the file alone does not
  * reveal them. Invitation links are stored only as SHA-256 digests. A member's `generation` is part of every token
- * issued to them: removing the member, or inviting them again, invalidates older tokens.
+ * issued to them: removing the member, or inviting them again, invalidates older tokens. Calendar feed links are stored
+ * only as SHA-256 digests too, one per account.
  */
 export class Store {
   readonly #db: DatabaseSync;
@@ -33,12 +36,15 @@ export class Store {
         CREATE TABLE members (id INTEGER PRIMARY KEY, label TEXT NOT NULL, credentials TEXT NOT NULL, generation TEXT NOT NULL, created_at TEXT NOT NULL);
         CREATE TABLE invitations (id TEXT PRIMARY KEY, label TEXT NOT NULL, expires_at TEXT NOT NULL);
         CREATE TABLE settings (scope TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
-        PRAGMA user_version = 3;`);
-    } else if (version === 1 || version === 2) {
+        ${calendarFeedsTable}
+        PRAGMA user_version = 4;`);
+    } else if (version >= 1 && version <= 3) {
       // Version 2 changed the booking plan, friends and participant filter formats: personal settings start over.
       if (version === 1) this.#db.exec("DELETE FROM settings WHERE scope <> 'gym';");
-      this.#migrateToOneGym();
-    } else if (version !== 3) {
+      if (version < 3) this.#migrateToOneGym();
+      // Version 4 added calendar feed links.
+      this.#db.exec(`${calendarFeedsTable} PRAGMA user_version = 4;`);
+    } else if (version !== 4) {
       throw new Error('Unsupported data file version');
     }
   }
@@ -124,6 +130,7 @@ export class Store {
   removeMember(id: number) {
     this.#db.prepare('DELETE FROM members WHERE id = ?').run(id);
     this.#db.prepare('DELETE FROM settings WHERE scope = ?').run(memberScope(id));
+    this.deleteCalendarFeed(String(id));
   }
 
   /** Create a single-use invitation link token, valid for seven days. Only its digest is stored. */
@@ -150,6 +157,28 @@ export class Store {
     return Number(this.#db.prepare('DELETE FROM invitations WHERE id = ?').run(id).changes) > 0;
   }
 
+  /** Create the account's calendar feed link token, replacing (and so revoking) any earlier one. Only its digest is stored. */
+  createCalendarFeed(sub: string) {
+    const token = randomBytes(32).toString('base64url');
+    this.#db.prepare('INSERT OR REPLACE INTO calendar_feeds (sub, digest, created_at) VALUES (?, ?, ?)').run(sub, digest(token), now());
+    return token;
+  }
+
+  calendarFeed(sub: string): CalendarFeed | undefined {
+    const row = this.#db.prepare('SELECT created_at FROM calendar_feeds WHERE sub = ?').get(sub) as { created_at: string } | undefined;
+    return row && { createdAt: row.created_at };
+  }
+
+  /** The account a calendar feed link token belongs to, or undefined when it is unknown or was revoked. */
+  calendarFeedAccount(token: string): string | undefined {
+    const row = this.#db.prepare('SELECT sub FROM calendar_feeds WHERE digest = ?').get(digest(token)) as { sub: string } | undefined;
+    return row?.sub;
+  }
+
+  deleteCalendarFeed(sub: string) {
+    this.#db.prepare('DELETE FROM calendar_feeds WHERE sub = ?').run(sub);
+  }
+
   /** Stored settings for a scope, validated with the schema; empty when none were saved. */
   settings<T>(scope: string, schema: z.ZodType<T>, empty: T): T {
     const row = this.#db.prepare('SELECT value FROM settings WHERE scope = ?').get(scope) as { value: string } | undefined;
@@ -172,6 +201,7 @@ export class Store {
 export const memberScope = (id: number) => `member:${id}`;
 /** The settings scope of the owner's account. */
 export const ownerScope = 'owner';
+const calendarFeedsTable = 'CREATE TABLE IF NOT EXISTS calendar_feeds (sub TEXT PRIMARY KEY, digest TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL);';
 
 interface MemberRow { id: number; label: string; generation: string; created_at: string }
 interface InvitationRow { id: string; label: string; expires_at: string }

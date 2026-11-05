@@ -58,7 +58,7 @@ Input: the `pending-credit-loss` reference, `confirmed: true` and `confirmedCred
 
 ### `get_upcoming_bookings` / `get_booking_history`
 
-The current upcoming bookings (`booked` or `waitlisted`) and the past bookings AimHarder returns. The upcoming view has no known date horizon, so a missing date does not prove there is no booking.
+The current upcoming bookings (`booked` or `waitlisted`) and the past bookings AimHarder returns. The upcoming view has no known date horizon, so a missing date does not prove there is no booking. On the remote server, the same upcoming view is also available as a private calendar feed ([remote use](remote.md#calendar-feed)).
 
 ## Workouts
 

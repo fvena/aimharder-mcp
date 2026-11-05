@@ -19,6 +19,7 @@ const messages: Record<string, { text: string; ok?: true }> = {
   removed: { text: 'Acceso retirado. Se han borrado su contraseña y sus ajustes.', ok: true },
   'invitation-deleted': { text: 'Invitación anulada. El enlace ya no funciona.', ok: true },
   'gym-chosen': { text: 'Gimnasio elegido. Configura ahora su zona horaria, tu plan y tus preferencias.', ok: true },
+  'calendar-revoked': { text: 'Enlace desactivado. Tu app de calendario ya no recibirá tus reservas.', ok: true },
   invalid: { text: 'No se ha guardado: algún valor no es válido. Revísalo y vuelve a intentarlo.' },
   'plan-slot': { text: 'No se ha añadido: elige una clase del horario.' },
   friend: { text: 'No se ha guardado: cada amigo necesita un nombre, de 100 caracteres como máximo.' },
@@ -269,9 +270,10 @@ ${signInForm({ action: `/invite/${encodeURIComponent(token)}`, submit: 'Aceptar 
 <p>Tu gimnasio, tu plan semanal, tu clase de entreno y tus amigos se configuran en <a href="/settings">Ajustes</a>.</p></section>`);
   });
 
-  // Each account's own settings: its gym (and that gym's rules) first, then the weekly plan, preferences and friends.
-  // Until the account has a gym (several and none chosen, or the chosen one is gone) only the choice of gym is shown.
-  router.get('/settings', signedIn, async (req, res) => {
+  // Each account's own settings: its gym (and that gym's rules) first, then the weekly plan, preferences, friends and the
+  // calendar link. Until the account has a gym (several and none chosen, or the chosen one is gone) only the choice of gym
+  // is shown. `calendarLink` is a calendar feed link just created, shown this once.
+  const settingsPage = async (req: Request, res: Response, status = 200, calendarLink?: string) => {
     const sub = res.locals.sub as string;
     const ctx = context(res);
     const config = accounts.preferences(sub);
@@ -337,9 +339,32 @@ ${haveTimetable ? `<form method="post" action="/settings/plan/add" data-plan><h3
 <label class="sr-only" for="friend-${e(id)}">Nombre de ${e(friend.name)}</label><input id="friend-${e(id)}" name="name:${e(id)}" value="${e(friend.name)}" maxlength="100" required>
 <button type="submit" form="remove-friend" name="id" value="${e(id)}" class="danger small" aria-label="Quitar a ${e(friend.name)}">Quitar</button></div>`).join('')}
 <div class="btn-row">${findLink}<button type="submit">Guardar nombres</button></div></form>` : `<p>Todavía no has añadido a nadie. Búscalos entre los apuntados a una clase a la que vayáis juntos.</p><div class="btn-row">${findLink}</div>`;
-    layout(res, 200, 'Ajustes', 'settings', `<h1>Ajustes</h1>${gymSection}${plan}${preferences}
+    const feed = accounts.calendarFeed(sub);
+    const calendar = `<section id="calendario"><h2>Calendario</h2><p class="lead">Tus próximas reservas en tu app de calendario (Apple, Google, Outlook…). Te suscribes a un enlace privado y se actualiza solo.</p>${notice(req, 'calendario')}
+${calendarLink ? `<div class="notice ok" role="status" tabindex="-1" data-notice>Enlace creado.</div>
+<p>Añádelo en tu app de calendario como calendario suscrito (o «desde URL»).</p>${copyField('calendar-link', calendarLink)}<p class="hint">Es un enlace nuevo: el anterior ya no funciona. Si tenías el calendario suscrito en alguna app, cambia allí el enlace por este. Cópialo ahora: no se volverá a mostrar. Quien tenga el enlace ve tus reservas, así que no lo compartas.</p>`
+    : feed ? `<p>Tienes un enlace activo desde el ${e(shortDate(feed.createdAt))}. Si lo has perdido o crees que otra persona lo tiene, crea uno nuevo: el anterior dejará de funcionar.</p>` : ''}
+<form id="calendar-create" method="post" action="/settings/calendar"></form>${feed ? '<form id="calendar-revoke" method="post" action="/settings/calendar/revoke"></form>' : ''}
+<div class="btn-row">${feed ? '<button type="submit" form="calendar-revoke" class="danger start">Desactivar el enlace</button>' : ''}<button type="submit" form="calendar-create"${feed ? '' : ' class="primary"'}>${feed ? 'Crear un enlace nuevo' : 'Crear el enlace'}</button></div>
+<p class="hint">Solo aparecen las reservas que AimHarder muestra como próximas; las que cancelas desaparecen. Tu app consulta el enlace cada cierto tiempo, así que un cambio puede tardar en verse.</p></section>`;
+    layout(res, status, 'Ajustes', 'settings', `<h1>Ajustes</h1>${gymSection}${plan}${preferences}
 <section id="amigos"><h2>Amigos</h2><p class="lead">Cuando preguntes quién va a una clase, puedes ver solo a tus amigos, con el nombre por el que los conoces.</p>${notice(req, 'amigos')}
-${friendList}</section>`);
+${friendList}</section>
+${calendar}`);
+  };
+  router.get('/settings', signedIn, (req, res) => settingsPage(req, res));
+
+  // The calendar feed link: creating one replaces the previous link, which stops working.
+  router.post('/settings/calendar', sameOrigin, signedIn, form, async (req, res) => {
+    // The link is offered once the account has a gym.
+    if (!(await accountOf(context(res)))?.gym) { res.redirect(303, '/settings#gimnasio'); return; }
+    const token = accounts.createCalendarFeed(res.locals.sub as string);
+    if (!token) { back(res, '/settings', 'calendario', 'invalid'); return; }
+    await settingsPage(req, res, 201, new URL(`/calendar/${token}.ics`, config.publicUrl).href);
+  });
+  router.post('/settings/calendar/revoke', sameOrigin, signedIn, form, (_req, res) => {
+    accounts.revokeCalendarFeed(res.locals.sub as string);
+    back(res, '/settings', 'calendario', 'calendar-revoked');
   });
 
   router.post('/settings/gym', sameOrigin, signedIn, form, async (req, res) => {

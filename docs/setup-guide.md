@@ -250,7 +250,8 @@ Open `https://ana-aimharder.fly.dev/settings` and sign in with your AimHarder ac
 - your **weekly booking plan**: pick a day and one of that day's classes, then **Añadir al plan**. You can add several classes on the same day and remove any of them,
 - the class whose workout you mean by "today's workout",
 - whether "who's in this class?" shows everyone or only your friends,
-- your **friends**: choose **Añadir amigos desde una clase**, pick a class you share with them and tick them. You can then change their name to the one you use, for example a nickname.
+- your **friends**: choose **Añadir amigos desde una clase**, pick a class you share with them and tick them. You can then change their name to the one you use, for example a nickname,
+- your **calendar**: under **Calendario**, click **Crear el enlace** and copy the private link into your calendar app as a subscribed calendar ("from URL"). Your upcoming bookings appear there and cancelled ones disappear. The link is shown once; if you lose it, create a new one and the old one stops working, so change it in your calendar app too.
 
 The weekly plan, the workout class and the participant filter can also go in your settings file, but the settings page is simpler; see [configuration](configuration.md).
 

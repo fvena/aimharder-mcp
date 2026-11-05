@@ -25,7 +25,7 @@ Locally over stdio (default), the server serves one AimHarder account. Remotely 
 | `MCP_TRANSPORT` | no | `stdio` (default) or `http`. |
 | `MCP_PUBLIC_URL` | with `http` | Public origin, without a path, for example `https://my-aimharder.fly.dev`. HTTPS is required except for `localhost`. The MCP endpoint is `<origin>/mcp`, and requests for other host names are rejected. |
 | `MCP_OWNER_SECRET` | with `http` | Secret, at least 16 characters, that nobody types: it derives the key that signs tokens and sessions and the key that encrypts members' stored passwords. Changing it disconnects every client and signs everyone out; members sign in again with their AimHarder account. |
-| `MCP_DATA_DIR` | no | Directory for the SQLite file with members, invitations and settings. Default `data` (relative to the working directory); the Docker image uses `/data`, which must be a persistent volume. |
+| `MCP_DATA_DIR` | no | Directory for the SQLite file with members, invitations, settings and calendar links. Default `data` (relative to the working directory); the Docker image uses `/data`, which must be a persistent volume. |
 | `MCP_HTTP_HOST` | no | Listening address. Default `127.0.0.1`; the Docker image uses `0.0.0.0`. |
 | `PORT` | no | Listening port, 1–65535. Default `3000`; the Docker image uses `8080`. |
 | `MCP_OAUTH_REDIRECT_URIS` | no | Extra OAuth redirect URIs, comma-separated (HTTPS, or HTTP on loopback). Claude's and ChatGPT's callbacks and loopback URIs are always accepted. |
@@ -39,7 +39,7 @@ On the remote server, each account edits its own settings at `<MCP_PUBLIC_URL>/s
 | Layer | Who edits it | Settings |
 | --- | --- | --- |
 | Environment | owner, with platform secrets | everything above, for the owner's account |
-| Own settings | each account, at `/settings` | its gym (chosen among the account's gyms when it has several) and that gym's rules (time zone, booking window, cancellation window), workout class, participant filter, weekly booking plan, friends with their names and pictures |
+| Own settings | each account, at `/settings` | its gym (chosen among the account's gyms when it has several) and that gym's rules (time zone, booking window, cancellation window), workout class, participant filter, weekly booking plan, friends with their names and pictures, the private calendar link to their upcoming bookings |
 
 Each account uses one gym. Until an account with several gyms chooses one, the settings page shows only that choice and every tool returns `GYM_REQUIRED`; if the chosen gym is no longer the account's, tools return `GYM_NOT_ACCESSIBLE` and the page asks for another. Choosing another gym clears every other setting, the environment's included, because they all belong to the previous gym: time zone, windows, plan, workout class, participant filter and friends. Saving the time zone confirms it. Choosing *Ninguna* as the workout class, or leaving a window empty, means none, even when the environment sets one; editing the plan or the friends list keeps the entries that came from the environment. The environment configures only the owner's account: members start from their own settings, and always confirm bookings (`AIMHARDER_REQUIRE_BOOKING_CONFIRMATION` applies to the owner only). Credentials, secrets, URLs and the redirect allowlist stay environment-only.
 

@@ -11,10 +11,11 @@ You run your **own instance**. It keeps your AimHarder credentials in your hosti
 - When a person connects a client, it opens an approval page on your server. They sign in there with their AimHarder email and password: the owner's are checked against `AIMHARDER_USERNAME`/`AIMHARDER_PASSWORD`, a member's with AimHarder itself, and only accounts the owner invited are accepted. The client then gets tokens for that account. Access tokens last one hour and refresh tokens 30 days, renewed automatically.
 - Each account has its own AimHarder sessions, single-use previews and settings. A member only ever reaches their own AimHarder account.
 - Client registrations, tokens and web sessions are signed with a key derived from `MCP_OWNER_SECRET`, so they survive restarts. **Changing the secret disconnects every client.** Removing a member, or inviting them again, invalidates their tokens.
-- Members, pending invitations and settings live in one SQLite file in `MCP_DATA_DIR`, which must be persistent storage (a volume). Members' AimHarder credentials are encrypted there with AES-256-GCM under a second key derived from `MCP_OWNER_SECRET`; invitation links are stored only as digests.
+- Members, pending invitations and settings live in one SQLite file in `MCP_DATA_DIR`, which must be persistent storage (a volume). Members' AimHarder credentials are encrypted there with AES-256-GCM under a second key derived from `MCP_OWNER_SECRET`; invitation links and calendar links are stored only as digests.
 - Redirects are allowed only to Claude's and ChatGPT's callback URLs, loopback URLs (local clients such as Claude Code) and any URLs you add in `MCP_OAUTH_REDIRECT_URIS`.
 - Failed sign-ins (approval page, settings and invitations) are limited to 10 every 15 minutes per client address.
 - Web pages use a signed, HttpOnly session cookie and accept form posts only from the server's own origin.
+- Calendar links (`GET /calendar/<token>.ics`) are limited to 60 requests every 15 minutes per client address. The token is never logged.
 - Requests whose `Host` is not the host of `MCP_PUBLIC_URL` are rejected. `GET /healthz` answers `{"status":"ok"}` for health checks.
 - Run **one instance**. AimHarder sessions and the two-minute preview references live in memory, so a confirmation must reach the instance that prepared it.
 
@@ -109,6 +110,15 @@ Then authenticate from `/mcp`.
 ## 4. Invite friends and change settings
 
 Every account has a settings page at `<MCP_PUBLIC_URL>/settings` (sign in with AimHarder): its gym (chosen among the account's gyms when it has several; changing it clears the other settings) and that gym's time zone, booking window and cancellation window, workout class and weekly booking plan chosen from the gym's timetable (several classes per day allowed), participant filter, and friends. Friends are added by ticking them among a class's participants; their name can be changed to the one you know them by, and their AimHarder picture is shown and refreshed when they appear again. One small script from the server (`/assets/app.js`) shows only the chosen weekday's classes in the plan form, adds copy buttons for the connector address and invitation links, and moves focus to the outcome of the last change; every page works without it. `get_account_context` reports this URL as `settingsUrl`. See [configuration](configuration.md#settings-page-http-only) for how these settings combine with the environment.
+
+### Calendar feed
+
+Under **Calendario** on the settings page, each account creates a private link to an iCalendar feed of its upcoming bookings, `<MCP_PUBLIC_URL>/calendar/<token>.ics`, to subscribe to from Apple Calendar, Google Calendar, Outlook or any app that accepts calendar URLs. Calendar apps cannot sign in with OAuth, so the link itself is the credential: a random 256-bit token, shown once and stored only as a SHA-256 digest. Creating a new link replaces the old one, which stops working (the page says so under the new link, which also happens when the form is sent again by reloading); **Desactivar el enlace** removes it, and removing a member removes theirs. Unknown, replaced and removed links answer 404. The section appears once the account has a gym; changing gyms keeps the link, which then lists the new gym's bookings.
+
+- The feed lists what `get_upcoming_bookings` reads at the account's gym: one event per booking, with the class as title, the gym as location and its start and end times as UTC instants, converted from the gym-local times with the gym's time zone (`Europe/Madrid` when none is confirmed). Calendar apps show them in the device's zone.
+- `STATUS` follows what AimHarder says: `CONFIRMED` for a booking, `TENTATIVE` and "(lista de espera)" in the title for the waitlist, and no `STATUS` when AimHarder reports another state. Cancelled and past bookings are not in AimHarder's upcoming view, so they disappear; keep history in the calendar app if you want it.
+- Each booking keeps the same `UID` on every read (`<gym>-<booking ID>@aimharder-mcp`), independent of the server's address, so subscribers update events in place. A booking taken from the waitlist is a new booking with a new ID (AimHarder does not move the waitlist up by itself), so it replaces the waitlisted event.
+- AimHarder is read at most every five minutes per account (`Cache-Control: private, max-age=300`, with an `ETag` for `If-None-Match`). If AimHarder cannot be read, or the account's gym is no longer its own, the feed answers 503 with `Retry-After` instead of an empty calendar, so subscribers keep what they had.
 
 The owner also has `/admin`, for people only (each account configures its own gym):
 

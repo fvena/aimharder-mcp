@@ -169,6 +169,25 @@ export class Accounts {
     return scope ? this.store.settings(scope, userSettingsSchema, {}) : {};
   }
 
+  // The calendar feed: one secret link per account to its upcoming bookings, for calendar apps that cannot sign in.
+
+  /** The account's calendar feed link, if it has one; the link itself is only shown when created. */
+  calendarFeed(sub: string) { return this.generation(sub) === undefined ? undefined : this.store.calendarFeed(sub); }
+
+  /** Create a new calendar feed link token for the account; any earlier link stops working. */
+  createCalendarFeed(sub: string): string | undefined {
+    return this.generation(sub) === undefined ? undefined : this.store.createCalendarFeed(sub);
+  }
+
+  revokeCalendarFeed(sub: string) { this.store.deleteCalendarFeed(sub); }
+
+  /** The account a calendar feed link token belongs to, while the link is active and the account exists. */
+  calendarFeedAccount(token: string): string | undefined {
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) return undefined;
+    const sub = this.store.calendarFeedAccount(token);
+    return sub !== undefined && this.generation(sub) !== undefined ? sub : undefined;
+  }
+
   /** Sign in with an AimHarder account: the owner's configured one, or a member's, verified with AimHarder. */
   async signIn(username: string, password: string): Promise<{ sub: string } | { error: SignInError }> {
     if (this.#isOwnerUsername(username)) return this.#isOwnerPassword(password) ? { sub: ownerSub } : { error: 'credentials' };

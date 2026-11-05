@@ -321,7 +321,7 @@ test('a data file of version 2 keeps what applied at each account\'s gym', async
   db.exec(`INSERT OR REPLACE INTO settings (scope, value, updated_at) VALUES
     ('gym', '{"gymTimeZones":{"sample-gym":"Atlantic/Canary"},"cancellationWindowMinutes":{"sample-gym":90},"activeGyms":["sample-gym"]}', '2026-01-01'),
     ('member:77', '{"defaultGym":"sample-gym","workoutClasses":{"sample-gym":"CROSS"},"bookingPlans":{"sample-gym":[{"day":"wed","className":"CROSS","startTime":"07:00"}],"old-gym":[]},"participantsFilter":"friends"}', '2026-01-01');
-    PRAGMA user_version = 2;`);
+    DROP TABLE calendar_feeds; PRAGMA user_version = 2;`);
   db.close();
   await start();
   const friend = await accountContext((await connect(people.friend)).accessToken!);
@@ -332,8 +332,9 @@ test('a data file of version 2 keeps what applied at each account\'s gym', async
   expect(owner.structuredContent).toMatchObject({ gym: { timeZone: 'Atlantic/Canary' }, defaults: { bookingPlan: [{ day: 'mon', className: 'CROSS' }] } });
   await stopAll();
   const migrated = new DatabaseSync(join(dataDir, 'aimharder-mcp.sqlite'));
-  expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 3 });
+  expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
   expect(migrated.prepare("SELECT scope FROM settings WHERE scope = 'gym'").all()).toEqual([]);
+  expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'calendar_feeds'").all()).toHaveLength(1);
   migrated.close();
   await start();
 });
