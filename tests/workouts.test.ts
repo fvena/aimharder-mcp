@@ -12,7 +12,7 @@ const requests: { method: string; url: URL }[] = [];
 const membership = (slug = 'sample-gym', boid = 200) => ({
   id: 100, boid, role: 'client', gym: 'Gimnasio Ñ', centre_url: `${slug}.aimharder.es`,
 });
-beforeAll(() => upstream.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => upstream.listen({ onUnhandledFrame: 'error' }));
 beforeEach(() => {
   requests.length = 0;
   upstream.use(

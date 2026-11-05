@@ -21,7 +21,7 @@ const daily = (bookings: unknown[] = [session()]) => ({
   clasesDisp: 'Clases disponibles', day: 'Source date label', bookings,
   timetable: [{ id: '0700_60', time: '07:00 - 08:00' }], seminars: [],
 });
-beforeAll(() => upstream.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => upstream.listen({ onUnhandledFrame: 'error' }));
 beforeEach(() => {
   requests.length = 0;
   upstream.use(

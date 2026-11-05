@@ -24,7 +24,7 @@ const requests: { method: string; url: string; cookie: string | null }[] = [];
 const upstream = setupServer();
 const connections: { client: Client; server: ReturnType<typeof createServer> }[] = [];
 
-beforeAll(() => upstream.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => upstream.listen({ onUnhandledFrame: 'error' }));
 beforeEach(() => {
   requests.length = 0;
   upstream.use(

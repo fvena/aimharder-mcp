@@ -16,7 +16,7 @@ const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 
 const spanish = (date: string) => `${Number(date.slice(8))} de ${months[Number(date.slice(5, 7)) - 1]} de ${date.slice(0, 4)}`;
 const session = (extra: Record<string, unknown> = {}) => ({ id: 840420, classId: 10, className: 'CROSS', time: '14:00 - 15:00', ocupation: 2, limit: 14, coachName: 'Sample Coach', ...extra });
 
-beforeAll(() => upstream.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => upstream.listen({ onUnhandledFrame: 'error' }));
 beforeEach(() => {
   requests.length = 0; issued = 0;
   upstream.use(

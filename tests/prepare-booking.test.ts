@@ -17,7 +17,7 @@ const row = (extra: Record<string, unknown> = {}) => ({
 });
 const day = (bookings: unknown[]) => ({ clasesDisp: 'Classes', day: 'Source label', bookings, timetable: [], seminars: [] });
 
-beforeAll(() => upstream.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => upstream.listen({ onUnhandledFrame: 'error' }));
 beforeEach(() => {
   requests.length = 0;
   upstream.use(

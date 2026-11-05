@@ -15,7 +15,7 @@ const recordDate = (date: string) => `${Number(date.slice(8))} de ${months[Numbe
 let days: Record<string, { id: number; wodClass?: string }[]> = {};
 let detailDates = new Map<number, string>();
 
-beforeAll(() => upstream.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => upstream.listen({ onUnhandledFrame: 'error' }));
 beforeEach(() => {
   requests.length = 0;
   days = {

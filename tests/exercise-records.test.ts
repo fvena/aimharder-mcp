@@ -21,7 +21,7 @@ const detail = (extra: Record<string, unknown> = {}) => ({
  ...extra,
 });
 
-beforeAll(() => upstream.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => upstream.listen({ onUnhandledFrame: 'error' }));
 beforeEach(() => {
  requests.length = 0;
  upstream.use(

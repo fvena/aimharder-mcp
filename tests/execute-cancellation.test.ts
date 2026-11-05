@@ -25,7 +25,7 @@ const day = () => ({ clasesDisp: 'Classes', day: 'Source label', bookings: missi
 const upcoming = () => ({ nextClasses: upcomingState === null ? [] : [{ id: 777, day: 'Sábado, 26 de Septiembre de 2026',
   time: '10:00 - 11:00', className: 'Open Box', bookState: upcomingState }], history: [] });
 
-beforeAll(() => upstream.listen({ onUnhandledRequest: 'error' }));
+beforeAll(() => upstream.listen({ onUnhandledFrame: 'error' }));
 beforeEach(() => {
   reservationId = 900; sourceSessionId = 501; bookState = 1; cancelledId = null; duplicate = false; missing = false; upcomingState = 1; writes = []; scheduleReads = 0;
   response = () => { bookState = null; cancelledId = 900; upcomingState = null; return HttpResponse.json({ cancelState: 1 }); };
