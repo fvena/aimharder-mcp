@@ -1,0 +1,37 @@
+{
+  "name": "aimharder-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local MCP server for AimHarder: classes, participants, bookings, workouts and personal records",
+  "license": "MIT",
+  "author": "Francisco Vena",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fvena/aimharder-mcp.git"
+  },
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "bin": {
+    "aimharder-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm test && npm run build",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "tough-cookie": "6.0.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.13.6",
+    "msw": "2.15.0",
+    "typescript": "7.0.2",
+    "vitest": "5.1.0"
+  }
+}
