@@ -85,19 +85,28 @@ export class AimHarderUpstream {
    * Queries are serialized so a session renewal cannot replace another query's session.
    */
   withGym<T>(gymId: string | undefined, work: (session: GymSession) => Promise<T>): Promise<T> {
-    const result = this.#queue.then(() => this.#run(gymId, work));
+    return this.#enqueue(() => this.#run(gymId, work, true));
+  }
+
+  /** Sign in and report the AimHarder account ID and every accessible gym, without selecting one. */
+  account(): Promise<{ accountId: number; gyms: Gym[] }> {
+    return this.#enqueue(() => this.#run(undefined, async (session) => ({ accountId: session.accountId, gyms: session.gyms.map(({ gym }) => gym) }), false));
+  }
+
+  #enqueue<T>(run: () => Promise<T>): Promise<T> {
+    const result = this.#queue.then(run);
     this.#queue = result.then(() => undefined, () => undefined);
     return result;
   }
 
-  async #run<T>(gymId: string | undefined, work: (session: GymSession) => Promise<T>): Promise<T> {
+  async #run<T>(gymId: string | undefined, work: (session: GymSession) => Promise<T>, select: boolean): Promise<T> {
     if (this.#authenticationFailure) throw this.#authenticationFailure;
     if (gymId !== undefined && !gymIdSchema.safeParse(gymId).success) throw new AimHarderError('GYM_NOT_ACCESSIBLE');
     if (this.#accountId === undefined) await this.#authenticate();
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const gyms = await this.#discoverGyms();
-        const selected = this.#select(gyms, gymId);
+        const selected = select ? this.#select(gyms, gymId) : gyms[0]!;
         return await work(this.#session(gyms, selected, attempt === 0));
       } catch (error) {
         if (!(error instanceof SessionExpired)) throw error;

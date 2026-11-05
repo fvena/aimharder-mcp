@@ -83,6 +83,38 @@ export function readConfiguration(environment: Record<string, string | undefined
   };
 }
 
+/** Preferences each account holder edits on the settings page; they override the environment for that account. */
+export const userSettingsSchema = z.object({
+  defaultGym: gymIdSchema.optional(),
+  workoutClasses: workoutClassesSchema.optional(),
+  bookingPlans: bookingPlansSchema.optional(),
+  participantsFilter: z.enum(['all', 'following']).optional(),
+  friends: friendsSchema.optional(),
+}).strict();
+export type UserSettings = z.infer<typeof userSettingsSchema>;
+/** Rules of a gym, shared by every account; only the owner edits them. They override the environment. */
+export const gymSettingsSchema = z.object({
+  gymTimeZones: timeZonesSchema.optional(),
+  bookingWindowDays: bookingWindowsSchema.optional(),
+  cancellationWindowMinutes: cancellationWindowsSchema.optional(),
+}).strict();
+export type GymSettings = z.infer<typeof gymSettingsSchema>;
+
+/** Layer gym settings, then the account's own settings, over a configuration. Per-gym values merge by gym ID. */
+export function applySettings<T extends Configuration>(base: T, gym: GymSettings, user: UserSettings): T {
+  return {
+    ...base,
+    gymTimeZones: { ...base.gymTimeZones, ...gym.gymTimeZones },
+    bookingWindowDays: { ...base.bookingWindowDays, ...gym.bookingWindowDays },
+    cancellationWindowMinutes: { ...base.cancellationWindowMinutes, ...gym.cancellationWindowMinutes },
+    workoutClasses: { ...base.workoutClasses, ...user.workoutClasses },
+    bookingPlans: { ...base.bookingPlans, ...(user.bookingPlans as Record<string, BookingPlan> | undefined) },
+    ...(user.defaultGym === undefined ? {} : { defaultGym: user.defaultGym }),
+    ...(user.participantsFilter === undefined ? {} : { participantsFilter: user.participantsFilter }),
+    ...(user.friends === undefined ? {} : { friends: user.friends }),
+  };
+}
+
 const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
 const isLoopback = (url: URL) => loopbackHosts.has(url.hostname);
 const urlSchema = z.string().refine((value) => URL.canParse(value)).transform((value) => new URL(value));
@@ -97,6 +129,7 @@ const httpEnvironmentSchema = z.object({
   MCP_HTTP_HOST: z.string().min(1).optional(),
   PORT: z.string().regex(/^\d{1,5}$/).transform(Number).refine((port) => port >= 1 && port <= 65_535).optional(),
   MCP_OAUTH_REDIRECT_URIS: z.string().optional(),
+  MCP_DATA_DIR: z.string().min(1).optional(),
 });
 
 /** OAuth redirect URIs accepted by default: Claude and ChatGPT connectors. Loopback URIs (local clients) are always accepted. */
@@ -116,7 +149,7 @@ export function readTransport(environment: Record<string, string | undefined>) {
   return transport;
 }
 
-/** Settings of the remote HTTP transport: public origin, owner secret, listening address and extra OAuth redirect URIs. */
+/** Settings of the remote HTTP transport: public origin, owner secret, listening address, extra OAuth redirect URIs and data directory. */
 export function readHttpConfiguration(environment: Record<string, string | undefined>) {
   const parsed = httpEnvironmentSchema.safeParse(environment);
   if (!parsed.success) throw new AimHarderError('INVALID_HTTP_CONFIGURATION');
@@ -130,6 +163,7 @@ export function readHttpConfiguration(environment: Record<string, string | undef
     host: parsed.data.MCP_HTTP_HOST ?? '127.0.0.1',
     port: parsed.data.PORT ?? 3000,
     redirectUris: [...defaultRedirectUris, ...redirects.data.map((url) => url.href)],
+    dataDir: parsed.data.MCP_DATA_DIR ?? 'data',
   };
 }
 
