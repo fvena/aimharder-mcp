@@ -11,6 +11,7 @@ A TypeScript MCP server for one AimHarder account, run locally over stdio or dep
 - `src/domain/`: schemas and parsers that validate and project upstream responses (classes, bookings, workouts, activity, exercises, participants, results).
 - `src/config.ts`, `src/errors.ts`: environment configuration and public error codes.
 - `tests/`: Vitest suites that drive the server through an in-memory MCP client against msw-simulated upstream responses; `tests/support/` holds shared simulators. Test through the MCP interface, not internals.
+- `.github/workflows/`: `ci.yml` (audit and `npm run check`) and the opt-in `deploy.yml` (Fly.io deploy after CI on `main`, enabled by the `FLY_APP` variable).
 - `docs/`: user documentation and the observed upstream contract (`aimharder-api.md`).
 
 ## Rules

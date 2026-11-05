@@ -1,0 +1,39 @@
+name: Deploy
+
+# Deploys the owner's Fly.io instance after CI passes on a push to main.
+# Opt-in: set the repository variable FLY_APP (the Fly app name) and the secret FLY_API_TOKEN
+# (`fly tokens create deploy -a <app>`). Without FLY_APP, forks and other repositories skip this job.
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fly-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: vars.FLY_APP != '' && github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # 1.6
+      # Build on the runner (it has Docker) instead of Fly's remote builder, then roll the single machine.
+      - run: flyctl deploy --app "$FLY_APP" --local-only
+        env:
+          FLY_APP: ${{ vars.FLY_APP }}
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      - name: Check health
+        run: curl --fail --silent --show-error --retry 5 --retry-delay 3 --retry-all-errors "https://$FLY_APP.fly.dev/healthz"
+        env:
+          FLY_APP: ${{ vars.FLY_APP }}

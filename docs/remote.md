@@ -47,6 +47,20 @@ fly deploy
 fly scale count 1
 ```
 
+If Fly's remote builder fails, build with your local Docker: `fly deploy --local-only`. With Docker Desktop, point flyctl at its socket: `DOCKER_HOST=unix://$HOME/.docker/run/docker.sock`.
+
+#### Deploy automatically from GitHub
+
+The [Deploy workflow](../.github/workflows/deploy.yml) redeploys your Fly app after CI passes on a push to `main`. It is opt-in, and repositories without the variable skip it. In your repository (or fork):
+
+```sh
+gh variable set FLY_APP --body <app>
+gh api --method PUT repos/<owner>/<repo>/environments/production
+fly tokens create deploy -a <app> | gh secret set FLY_API_TOKEN --env production
+```
+
+The deploy token is limited to that one app. Secrets stay in Fly; the workflow only builds and rolls out the image.
+
 ### From your own computer
 
 You can also run the server at home and publish it with a tunnel that gives a stable HTTPS URL, such as Tailscale Funnel or a named Cloudflare Tunnel. It is then only reachable while your computer is on.
