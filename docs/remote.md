@@ -108,14 +108,14 @@ Then authenticate from `/mcp`.
 
 ## 4. Invite friends and change settings
 
-Every account has a settings page at `<MCP_PUBLIC_URL>/settings` (sign in with AimHarder): default gym (with several active gyms), workout class and weekly booking plan chosen from the gym's timetable (several classes per day allowed), participant filter, and friends. Friends are added by ticking them among a class's participants; their name can be changed to the one you know them by, and their AimHarder picture is shown and refreshed when they appear again. The plan form uses one small script from the server to show only the chosen weekday's classes, and works without it. `get_account_context` reports this URL as `settingsUrl`. See [configuration](configuration.md#settings-page-http-only) for how these settings combine with the environment.
+Every account has a settings page at `<MCP_PUBLIC_URL>/settings` (sign in with AimHarder): default gym (with several active gyms), workout class and weekly booking plan chosen from the gym's timetable (several classes per day allowed), participant filter, and friends. Friends are added by ticking them among a class's participants; their name can be changed to the one you know them by, and their AimHarder picture is shown and refreshed when they appear again. One small script from the server (`/assets/app.js`) shows only the chosen weekday's classes in the plan form, adds copy buttons for the connector address and invitation links, and moves focus to the outcome of the last change; every page works without it. `get_account_context` reports this URL as `settingsUrl`. See [configuration](configuration.md#settings-page-http-only) for how these settings combine with the environment.
 
 The owner also has `/admin`:
 
-- **Invitar**: creates a single-use link, valid for seven days, for a named person. The link is shown once. The person opens it, signs in with their AimHarder account, and gets a page with the connector address and the steps for Claude and ChatGPT.
-- **Personas con acceso**: lists members and removes them. Removing a member deletes their stored credentials and settings and invalidates their tokens and sessions.
+- **Personas con acceso**: lists members and pending invitations, and creates invitations. Removing a member asks for confirmation first, then deletes their stored credentials and settings and invalidates their tokens and sessions.
+- **Invitar a alguien** (in the same section): creates a single-use link, valid for seven days, for a named person. The link is shown once. The person opens it, signs in with their AimHarder account, and gets a page with the connector address and the steps for Claude and ChatGPT.
 - **Gimnasios**: the gyms the server uses, chosen among the owner's. The others disappear for every account, and invitations from people with none of them are refused.
-- **Reglas del gimnasio**: time zone, booking window and cancellation window per active gym, for every account.
+- **Reglas del gimnasio**: time zone, booking window and cancellation window per active gym, for every account. An empty field uses the environment's value, shown as its placeholder.
 
 The pages are in Spanish, for the gym's members.
 

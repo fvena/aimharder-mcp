@@ -131,7 +131,7 @@ async function invite(label = 'Laura') {
   const owner = await signIn(people.owner);
   const created = await post('/admin/invitations', { label }, owner);
   expect(created.status).toBe(201);
-  const link = /<span class="copy">([^<]+)<\/span>/.exec(await created.text())?.[1];
+  const link = /<code class="copy" id="invitation-link">([^<]+)<\/code>/.exec(await created.text())?.[1];
   expect(link).toMatch(new RegExp(`^${base}/invite/`));
   return new URL(link!).pathname;
 }
@@ -235,27 +235,27 @@ test('each account edits its own plan, preferences and friends, and the connecto
   expect(page).toContain('<option value="tue|07:00|CROSS">07:00 · CROSS</option>');
   expect(page).toContain('<option value="CROSS">CROSS</option>');
   expect(page).not.toContain('Gimnasio por defecto');
-  expect(page).toContain('<script src="/settings/plan.js" defer></script>');
-  expect((await get('/settings/plan.js')).headers.get('content-type')).toContain('text/javascript');
+  expect(page).toContain('<script src="/assets/app.js" defer></script>');
+  expect((await get('/assets/app.js')).headers.get('content-type')).toContain('text/javascript');
 
-  const saved = '/settings?message=saved';
+  const outcome = (section: string, message: string, field?: string) => `/settings?message=${message}&section=${section}${field ? `&field=${field}` : ''}#${field ?? section}`;
   for (const slot of ['tue|07:00|CROSS', 'mon|07:00|CROSS', 'tue|07:00|CROSS']) {
-    expect((await post('/settings/plan/add', { gym: 'sample-gym', day: 'mon', slot }, cookie)).headers.get('location')).toBe(saved);
+    expect((await post('/settings/plan/add', { gym: 'sample-gym', day: 'mon', slot }, cookie)).headers.get('location')).toBe(outcome('plan', 'plan-added'));
   }
-  expect((await post('/settings/plan/add', { gym: 'sample-gym', day: 'mon', slot: 'someday|07:00|CROSS' }, cookie)).headers.get('location')).toBe('/settings?message=plan-slot');
-  expect((await post('/settings/plan/add', { gym: 'sample-gym', day: 'mon', slot: '' }, cookie)).headers.get('location')).toBe('/settings?message=plan-slot');
-  expect((await post('/settings/plan/remove', { gym: 'sample-gym', day: 'mon', startTime: '07:00', className: 'CROSS' }, cookie)).headers.get('location')).toBe(saved);
-  expect((await post('/settings/preferences', { 'workout:sample-gym': 'CROSS', participantsFilter: 'friends' }, cookie)).headers.get('location')).toBe(saved);
-  expect((await post('/settings/preferences', { participantsFilter: 'following' }, cookie)).headers.get('location')).toBe('/settings?message=invalid');
+  expect((await post('/settings/plan/add', { gym: 'sample-gym', day: 'mon', slot: 'someday|07:00|CROSS' }, cookie)).headers.get('location')).toBe(outcome('plan', 'plan-slot'));
+  expect((await post('/settings/plan/add', { gym: 'sample-gym', day: 'mon', slot: '' }, cookie)).headers.get('location')).toBe(outcome('plan', 'plan-slot'));
+  expect((await post('/settings/plan/remove', { gym: 'sample-gym', day: 'mon', startTime: '07:00', className: 'CROSS' }, cookie)).headers.get('location')).toBe(outcome('plan', 'plan-removed'));
+  expect((await post('/settings/preferences', { 'workout:sample-gym': 'CROSS', participantsFilter: 'friends' }, cookie)).headers.get('location')).toBe(outcome('preferencias', 'saved'));
+  expect((await post('/settings/preferences', { participantsFilter: 'following' }, cookie)).headers.get('location')).toBe(outcome('preferencias', 'invalid'));
 
   const found = await (await get('/settings/friends/find?gym=sample-gym&date=2026-11-05&class=CROSS&time=07:00', cookie)).text();
   expect(found).toContain('Private Partner');
   expect(found).toContain('src="https://images.example.invalid/88-new.jpg"');
   expect(found).not.toContain('Friend Fixture');
-  expect((await post('/settings/friends/add', { friend: '88', 'name:88': 'Private Partner', 'photo:88': 'https://images.example.invalid/88.jpg' }, cookie)).headers.get('location')).toBe(saved);
-  expect((await post('/settings/friends/rename', { id: '88', name: 'Pepe' }, cookie)).headers.get('location')).toBe(saved);
-  expect((await post('/settings/friends/rename', { id: '88', name: '' }, cookie)).headers.get('location')).toBe('/settings?message=friend');
-  expect((await post('/settings/friends/add', { friend: '89', 'name:89': 'Someone', 'photo:89': 'http://images.example.invalid/89.jpg' }, cookie)).headers.get('location')).toBe('/settings?message=friend');
+  expect((await post('/settings/friends/add', { friend: '88', 'name:88': 'Private Partner', 'photo:88': 'https://images.example.invalid/88.jpg' }, cookie)).headers.get('location')).toBe(outcome('amigos', 'friends-added'));
+  expect((await post('/settings/friends/rename', { 'name:88': 'Pepe', 'name:404': 'Nobody' }, cookie)).headers.get('location')).toBe(outcome('amigos', 'saved'));
+  expect((await post('/settings/friends/rename', { 'name:88': '' }, cookie)).headers.get('location')).toBe(outcome('amigos', 'friend'));
+  expect((await post('/settings/friends/add', { friend: '89', 'name:89': 'Someone', 'photo:89': 'http://images.example.invalid/89.jpg' }, cookie)).headers.get('location')).toBe(outcome('amigos', 'friend'));
   // Seeing a friend again in a class refreshes their picture.
   await get('/settings/friends/find?gym=sample-gym&date=2026-11-05&class=CROSS&time=07:00', cookie);
   const settings = await (await get('/settings', cookie)).text();
@@ -278,8 +278,8 @@ test('the owner chooses the gyms the server uses, for every account', async () =
   const admin = await (await get('/admin', owner)).text();
   expect(admin).toContain('Gimnasio antiguo');
   expect((await connect(people.owner)).status).toBe(302);
-  expect((await post('/admin/gyms', {}, owner)).headers.get('location')).toBe('/admin?message=gyms');
-  expect((await post('/admin/gyms', { gym: 'sample-gym' }, owner)).headers.get('location')).toBe('/admin?message=saved');
+  expect((await post('/admin/gyms', {}, owner)).headers.get('location')).toBe('/admin?message=gyms&section=gimnasios#gimnasios');
+  expect((await post('/admin/gyms', { gym: 'sample-gym' }, owner)).headers.get('location')).toBe('/admin?message=saved&section=gimnasios#gimnasios');
 
   const connection = await connect(people.owner);
   const result = await accountContext(connection.accessToken!);
@@ -292,7 +292,7 @@ test('the owner chooses the gyms the server uses, for every account', async () =
   const path = await invite();
   const refused = await post(path, { username: people.formerMember.username, password: people.formerMember.password });
   expect(refused.status).toBe(403);
-  expect(await refused.text()).toContain('no pertenece a ninguno de los gimnasios');
+  expect(await refused.text()).toContain('no es de ninguno de los gimnasios');
   expect((await get(path)).status).toBe(200);
 });
 
@@ -316,7 +316,12 @@ test('removing a member signs them out everywhere and deletes their data', async
   const owner = await signIn(people.owner);
   const admin = await (await get('/admin', owner)).text();
   expect(admin).toContain('Laura');
-  expect((await post('/admin/members/remove', { id: '77' }, owner)).status).toBe(303);
+  // The first post only asks for confirmation; the member keeps access until it is confirmed.
+  const confirmation = await post('/admin/members/remove', { id: '77' }, owner);
+  expect(confirmation.status).toBe(200);
+  expect(await confirmation.text()).toContain('name="confirm" value="yes"');
+  expect(await mcpStatus(friend.accessToken!)).toBe(200);
+  expect((await post('/admin/members/remove', { id: '77', confirm: 'yes' }, owner)).headers.get('location')).toBe('/admin?message=removed&section=personas#personas');
 
   expect(await mcpStatus(friend.accessToken!)).toBe(401);
   expect((await get('/settings', cookie)).headers.get('location')).toBe('/login');
@@ -343,8 +348,11 @@ test('administration is for the owner only, and forms must come from this origin
 
 test('the owner sets the gym rules for every account', async () => {
   const owner = await signIn(people.owner);
-  expect((await post('/admin/gym', { 'tz:sample-gym': 'Europe/Madrid', 'book:sample-gym': '7', 'cancel:sample-gym': '90' }, owner)).headers.get('location')).toBe('/admin?message=saved');
-  expect((await post('/admin/gym', { 'tz:sample-gym': 'Mars/Olympus' }, owner)).headers.get('location')).toBe('/admin?message=invalid');
+  expect((await post('/admin/gym', { 'tz:sample-gym': 'Europe/Madrid', 'book:sample-gym': '7', 'cancel:sample-gym': '90' }, owner)).headers.get('location')).toBe('/admin?message=saved&section=reglas#reglas');
+  expect((await post('/admin/gym', { 'tz:sample-gym': 'Mars/Olympus' }, owner)).headers.get('location')).toBe('/admin?message=tz&section=reglas&field=tz-sample-gym#tz-sample-gym');
+  expect((await post('/admin/gym', { 'book:sample-gym': '99' }, owner)).headers.get('location')).toBe('/admin?message=book&section=reglas&field=book-sample-gym#book-sample-gym');
+  const invalidRule = await (await get('/admin?message=book&section=reglas&field=book-sample-gym', owner)).text();
+  expect(invalidRule).toContain('aria-invalid="true" aria-describedby="book-sample-gym-error"');
   await joinAs(people.friend);
   const friend = await connect(people.friend);
   expect((await accountContext(friend.accessToken!)).structuredContent).toMatchObject({ selectedGym: { timeZone: 'Europe/Madrid', timeZoneStatus: 'user-confirmed' } });
