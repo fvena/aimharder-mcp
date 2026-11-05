@@ -195,7 +195,7 @@ If not, see [Troubleshooting](#troubleshooting).
 
 ## Step 10. Connect Claude
 
-On [claude.ai](https://claude.ai), in a browser:
+You add the connector **once** to your Claude account, and it then works on claude.ai, the desktop app and the mobile app. Do it on [claude.ai](https://claude.ai) in a browser or in the Claude desktop app, where it's easier to paste your owner secret than on the phone:
 
 1. Open **Customize → Connectors**.
 2. Click **Add custom connector**.
@@ -204,7 +204,14 @@ On [claude.ai](https://claude.ai), in a browser:
 5. Click **Add**, then **Connect**.
 6. A page titled **Authorize AimHarder MCP** opens. Type your owner secret and click **Authorize**.
 
-The connector now works on claude.ai, in the desktop app and in the **mobile app**, with nothing more to set up on the phone. In a chat, check that it's switched on under **+ → Connectors**.
+The connector now works on claude.ai, in the desktop app and in the **mobile app**, with nothing more to set up on the phone. Sign in to the app with the same Claude account. If the connector doesn't show up on the phone, close the app completely and open it again.
+
+In a chat, on any device, check that it's switched on under **+ → Connectors**.
+
+The first time Claude uses each tool, it asks for your permission:
+
+- For tools that only read (classes, workouts, bookings, results), you can choose **Always allow**.
+- For tools that change something (book, cancel, save or delete a result), keep approving each use. You can also block any tool you don't want under **Customize → Connectors → AimHarder**.
 
 ## Step 11. Connect ChatGPT (optional)
 
