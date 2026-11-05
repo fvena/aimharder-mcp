@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { dateSchema, parseClassDay, timeSchema } from './classes.js';
 import { gymIdSchema } from '../config.js';
@@ -33,56 +32,50 @@ const rowFields = z.object({
   cancelledId: z.number().int().nullable(), resadmin: z.number().int(),
   hidden: z.number().int().optional(),
 });
+const reservationFields = rowFields.extend({ idres: z.number().int().positive().safe().nullable() });
 
-export type BookingCandidate = {
+/** A class to book or cancel; a booking plan gives no end time, which then matches any. */
+export interface ClassTarget { className: string; date: string; startTime: string; endTime?: string | undefined }
+export type BookingState = 'unbooked' | 'booked' | 'waitlisted' | 'unknown';
+export type CancellationState = 'booked' | 'waitlisted' | 'cancelled' | 'unbooked' | 'unknown';
+export type Eligibility = 'offered' | 'unsupported';
+
+/** One daily-schedule row of the target class, as this account sees it: whether it can be booked, and cancelled. */
+export interface ClassBookingRow {
+  sourceId: number;
+  /** The account's reservation (idres), when the row has a readable one. */
+  reservationId: number | null;
   className: string; date: string; startTime: string; endTime: string;
-  currentState: 'unbooked' | 'booked' | 'waitlisted' | 'unknown';
-  eligibility: 'offered' | 'unsupported';
-};
-export type InternalBookingCandidate = BookingCandidate & { sourceId: number };
-
-export type CancellationCandidate = {
-  className: string; date: string; startTime: string; endTime: string;
-  currentState: 'booked' | 'waitlisted' | 'cancelled' | 'unbooked' | 'unknown';
-  eligibility: 'offered' | 'unsupported';
-};
-export type InternalCancellationCandidate = CancellationCandidate & { sourceId: number; reservationId: number | null };
-
-export function cancellationCandidates(body: unknown, gymId: string, date: string, timeZone: string, query: BookingCancellationQuery): InternalCancellationCandidate[] {
-  const sessions = parseClassDay(body, gymId, date, timeZone);
-  const rows = (body as { bookings: unknown[] }).bookings;
-  const cancellationFields = rowFields.extend({ idres: z.number().int().positive().safe().nullable() });
-  return sessions.flatMap((session, index) => {
-    const endTime = session.timeLabel.slice(-5);
-    if (session.classType.name !== query.className || session.startTime !== query.startTime || endTime !== query.endTime) return [];
-    const flags = cancellationFields.safeParse(rows[index]);
-    const state = !flags.success ? 'unknown' as const : flags.data.cancelledId !== null ? 'cancelled' as const
-      : flags.data.bookState === 1 ? 'booked' as const : flags.data.bookState === 0 ? 'waitlisted' as const
-        : flags.data.bookState === null ? 'unbooked' as const : 'unknown' as const;
-    // Waitlist leaves belong to a later feature, even if the frontend offers them.
-    const offered = flags.success && state === 'booked' && flags.data.idres !== null && flags.data.enabled === 1
-      && flags.data.resadmin === 0 && (flags.data.hidden === undefined || flags.data.hidden === 0);
-    return [{ sourceId: session.sourceId, reservationId: flags.success ? flags.data.idres : null, className: session.classType.name, date,
-      startTime: session.startTime, endTime, currentState: state,
-      eligibility: offered ? 'offered' as const : 'unsupported' as const }];
-  });
+  booking: { state: BookingState; eligibility: Eligibility };
+  cancellation: { state: CancellationState; eligibility: Eligibility };
 }
 
-/** Booking candidates for a class name and start time; an end time, when given, must match too (a booking plan has none). */
-export function bookingCandidates(body: unknown, gymId: string, date: string, timeZone: string, query: { className: string; startTime: string; endTime?: string }): InternalBookingCandidate[] {
+/**
+ * The rows of one exact class in a daily schedule response. The whole day is validated first. Waitlist leaves belong to
+ * a later feature, so only a booked reservation can be cancelled, and only an unbooked, enabled row can be booked.
+ */
+export function classBookingRows(body: unknown, gymId: string, date: string, timeZone: string, target: ClassTarget): ClassBookingRow[] {
   const sessions = parseClassDay(body, gymId, date, timeZone);
   const rows = (body as { bookings: unknown[] }).bookings;
   return sessions.flatMap((session, index) => {
     const endTime = session.timeLabel.slice(-5);
-    if (session.classType.name !== query.className || session.startTime !== query.startTime || (query.endTime !== undefined && endTime !== query.endTime)) return [];
+    if (session.classType.name !== target.className || session.startTime !== target.startTime || (target.endTime !== undefined && endTime !== target.endTime)) return [];
     const flags = rowFields.safeParse(rows[index]);
-    const state = !flags.success ? 'unknown' as const : flags.data.bookState === null ? 'unbooked' as const
-      : flags.data.bookState === 1 ? 'booked' as const : flags.data.bookState === 0 ? 'waitlisted' as const : 'unknown' as const;
-    const offered = flags.success && flags.data.enabled === 1 && flags.data.resadmin === 0
-      && flags.data.cancelledId === null && (flags.data.hidden === undefined || flags.data.hidden === 0) && state === 'unbooked';
-    return [{ sourceId: session.sourceId, className: session.classType.name, date,
-      startTime: session.startTime, endTime, currentState: state,
-      eligibility: offered ? 'offered' as const : 'unsupported' as const }];
+    const reservation = reservationFields.safeParse(rows[index]);
+    const visible = (data: z.infer<typeof rowFields>) => data.enabled === 1 && data.resadmin === 0 && (data.hidden === undefined || data.hidden === 0);
+    const bookingState: BookingState = !flags.success ? 'unknown' : flags.data.bookState === null ? 'unbooked'
+      : flags.data.bookState === 1 ? 'booked' : flags.data.bookState === 0 ? 'waitlisted' : 'unknown';
+    const cancellationState: CancellationState = !reservation.success ? 'unknown' : reservation.data.cancelledId !== null ? 'cancelled'
+      : reservation.data.bookState === 1 ? 'booked' : reservation.data.bookState === 0 ? 'waitlisted'
+        : reservation.data.bookState === null ? 'unbooked' : 'unknown';
+    const bookable = flags.success && visible(flags.data) && flags.data.cancelledId === null && bookingState === 'unbooked';
+    const cancellable = reservation.success && visible(reservation.data) && cancellationState === 'booked' && reservation.data.idres !== null;
+    return [{
+      sourceId: session.sourceId, reservationId: reservation.success ? reservation.data.idres : null,
+      className: session.classType.name, date, startTime: session.startTime, endTime,
+      booking: { state: bookingState, eligibility: bookable ? 'offered' : 'unsupported' },
+      cancellation: { state: cancellationState, eligibility: cancellable ? 'offered' : 'unsupported' },
+    }];
   });
 }
 
@@ -131,7 +124,7 @@ export function insideCancellationWindow(date: string, startTime: string, timeZo
 
 export type BookingCreationPreview = {
   action: 'create'; gym: { id: string; name: string; timeZone: string; timeZoneStatus: 'user-confirmed' };
-  target: Omit<BookingCandidate, 'currentState' | 'eligibility'>;
+  target: { className: string; date: string; startTime: string; endTime: string };
   currentState: 'unbooked';
   notices: string[];
 };
@@ -141,43 +134,3 @@ export type BookingCancellationPreview = {
   credit: { possibleLoss: string; balance: null; entitlementPeriod: null };
   notices: string[];
 };
-
-type Preparation =
-  | { action: 'create'; accountId: number; boxId: number; sourceId: number; preview: BookingCreationPreview; expires: number }
-  | { action: 'cancel' | 'cancel-late'; accountId: number; boxId: number; reservationId: number; preview: BookingCancellationPreview; expires: number };
-
-export class BookingPreparationStore {
-  #entries = new Map<string, Preparation>();
-
-  issue(accountId: number, boxId: number, sourceId: number, preview: BookingCreationPreview) {
-    return this.#issue({ action: 'create', accountId, boxId, sourceId, preview });
-  }
-
-  issueCancellation(accountId: number, boxId: number, reservationId: number, preview: BookingCancellationPreview) {
-    return this.#issue({ action: 'cancel', accountId, boxId, reservationId, preview });
-  }
-
-  issueLateCancellation(accountId: number, boxId: number, reservationId: number, preview: BookingCancellationPreview) {
-    return this.#issue({ action: 'cancel-late', accountId, boxId, reservationId, preview });
-  }
-
-  #issue(entry: Omit<Extract<Preparation, { action: 'create' }>, 'expires'> | Omit<Extract<Preparation, { action: 'cancel' | 'cancel-late' }>, 'expires'>) {
-    const now = Date.now();
-    for (const [reference, entry] of this.#entries) if (entry.expires <= now) this.#entries.delete(reference);
-    if (this.#entries.size >= 32) this.#entries.delete(this.#entries.keys().next().value!);
-    const actionReference = randomBytes(32).toString('hex');
-    const expires = now + 120_000;
-    this.#entries.set(actionReference, { ...entry, preview: structuredClone(entry.preview), expires } as Preparation);
-    return { actionReference, expiresAt: new Date(expires).toISOString() };
-  }
-
-  take(reference: string, action: 'create', accountId: number, gymId: string): Extract<Preparation, { action: 'create' }> | null;
-  take(reference: string, action: 'cancel', accountId: number, gymId: string): Extract<Preparation, { action: 'cancel' | 'cancel-late' }> | null;
-  take(reference: string, action: 'cancel-late', accountId: number, gymId: string): Extract<Preparation, { action: 'cancel' | 'cancel-late' }> | null;
-  take(reference: string, action: 'create' | 'cancel' | 'cancel-late', accountId: number, gymId: string): Preparation | null {
-    const entry = this.#entries.get(reference);
-    this.#entries.delete(reference);
-    if (!entry || entry.expires <= Date.now() || entry.action !== action || entry.accountId !== accountId || entry.preview.gym.id !== gymId) return null;
-    return entry;
-  }
-}

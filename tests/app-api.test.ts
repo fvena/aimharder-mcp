@@ -165,6 +165,17 @@ test('reports rejected and unreadable saves without retrying', async () => {
   responses = [];
 });
 
+test('a save whose request fails is reported as uncertain, sent once and never retried', async () => {
+  upstream.use(http.post(`${app}/activity`, () => new HttpResponse(null, { status: 403 })));
+  const client = await connect();
+  const preview = await client.callTool({ name: 'prepare_exercise_result', arguments: { exerciseId: 18, date: today, sets: 3, reps: 5, loadKg: 80 } });
+  const reference = (preview.structuredContent as { actionReference: string }).actionReference;
+  const result = await client.callTool({ name: 'execute_exercise_result', arguments: { actionReference: reference, confirmed: true } });
+  expect(result.isError).not.toBe(true);
+  expect(result.structuredContent).toMatchObject({ status: 'uncertain', activityId: null });
+  expect(appCalls('activity')).toHaveLength(1);
+});
+
 test('rejects future dates and invalid loads before any request', async () => {
   const client = await connect();
   for (const args of [{ exerciseId: 18, date: '2999-01-01', sets: 1, reps: 1, loadKg: 50 }, { exerciseId: 18, date: today, sets: 1, reps: 1, loadKg: 50.1 }]) {

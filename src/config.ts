@@ -57,7 +57,7 @@ const environmentSchema = z.object({
   AIMHARDER_BOOKING_PLAN: z.string().optional(),
   AIMHARDER_FRIENDS: z.string().optional(),
 });
-export type Configuration = Omit<ReturnType<typeof readConfiguration>, 'requireBookingConfirmation' | 'bookingWindowDays' | 'cancellationWindowMinutes' | 'participantsFilter' | 'workoutClasses' | 'bookingPlans' | 'friends'> & { friends?: Friends; activeGyms?: string[]; workoutClasses?: Record<string, string>; bookingPlans?: Record<string, BookingPlan>; requireBookingConfirmation?: boolean; bookingWindowDays?: Record<string, number>; cancellationWindowMinutes?: Record<string, number>; participantsFilter?: ParticipantsFilterValue };
+export type Configuration = Omit<ReturnType<typeof readConfiguration>, 'requireBookingConfirmation' | 'bookingWindowDays' | 'cancellationWindowMinutes' | 'participantsFilter' | 'workoutClasses' | 'bookingPlans' | 'friends'> & { friends?: Friends; activeGyms?: string[]; workoutClasses?: Record<string, string | null>; bookingPlans?: Record<string, BookingPlan>; requireBookingConfirmation?: boolean; bookingWindowDays?: Record<string, number>; cancellationWindowMinutes?: Record<string, number>; participantsFilter?: ParticipantsFilterValue };
 
 export function readConfiguration(environment: Record<string, string | undefined>) {
   const parsed = environmentSchema.safeParse(environment);
@@ -101,7 +101,8 @@ export function readConfiguration(environment: Record<string, string | undefined
 /** Preferences each account holder edits on the settings page; they override the environment for that account. */
 export const userSettingsSchema = z.object({
   defaultGym: gymIdSchema.optional(),
-  workoutClasses: workoutClassesSchema.optional(),
+  /** By gym: the class meant by "today's workout", or null for none (which overrides the environment's). */
+  workoutClasses: z.record(gymIdSchema, className.nullable()).optional(),
   bookingPlans: bookingPlansSchema.optional(),
   participantsFilter: z.enum(participantsFilterValues).optional(),
   friends: friendsSchema.optional(),

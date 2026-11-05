@@ -31,6 +31,7 @@ export const exercise1RMResultSchema = z.object({
 });
 
 const progressionPointSchema = z.object({ value: sourceValueSchema, unit: z.enum(['kg', 'lbs']).nullable(), sourceDate: z.string(), newMark: z.boolean() });
+type ProgressionPoint = z.infer<typeof progressionPointSchema>;
 export const exerciseProgressionResultSchema = z.object({
   gym: exercise1RMResultSchema.shape.gym,
   exercise: exercise1RMResultSchema.shape.exercise,
@@ -112,7 +113,7 @@ export function parseExerciseProgression(body: unknown, exerciseId: number, acco
       return { value: point.lbs, unit: physicalUnit(point, row.history), sourceDate: new Date(point.date).toISOString().slice(0, 10), newMark: markers.has(Number(category.slice(0, -2))) };
     });
     return [category, points.sort((a, b) => a.sourceDate.localeCompare(b.sourceDate))];
-  }));
+  })) as Record<'1RM' | '3RM' | '5RM' | '10RM', ProgressionPoint[]>;
   return {
     exercise: { sourceExerciseId: exerciseId, name: row.name }, series,
     ...(includeWod ? { wodContext: row.chartDataWOD.map(point => ({ sourceDate: new Date(point.date).toISOString().slice(0, 10), sourceValue: point.lbs ?? null })) } : {}),

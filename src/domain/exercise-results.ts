@@ -1,4 +1,3 @@
-import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 import { dateSchema } from './classes.js';
 import { gymIdSchema } from '../config.js';
@@ -18,7 +17,7 @@ export const exerciseResultQuerySchema = z.object({
 export type ExerciseResultQuery = z.infer<typeof exerciseResultQuerySchema>;
 export const exerciseResultExecutionSchema = z.object({
   actionReference: z.string().regex(/^[0-9a-f]{64}$/),
-  confirmed: z.literal(true).describe('Set only after the account holder confirmed this exact preview.'),
+  confirmed: z.literal(true).optional().describe('Set only after the account holder confirmed this exact preview.'),
   gymId: gymIdSchema.optional(),
 }).strict();
 export type ExerciseResultExecution = z.infer<typeof exerciseResultExecutionSchema>;
@@ -70,28 +69,6 @@ export function parseSaveResponse(text: unknown): { status: 'saved'; activityId:
     return id.success ? { status: 'saved', activityId: Number(id.data) } : { status: 'unknown' };
   }
   return { status: 'unknown' };
-}
-
-/** Two-minute, single-use references for exercise result previews (saving or deleting). */
-export class PreparationStore<P extends { gym: { id: string } }> {
-  #entries = new Map<string, { accountId: number; boxId: number; preview: P; expires: number }>();
-
-  issue(accountId: number, boxId: number, preview: P) {
-    const now = Date.now();
-    for (const [reference, entry] of this.#entries) if (entry.expires <= now) this.#entries.delete(reference);
-    if (this.#entries.size >= 32) this.#entries.delete(this.#entries.keys().next().value!);
-    const actionReference = randomBytes(32).toString('hex');
-    const expires = now + 120_000;
-    this.#entries.set(actionReference, { accountId, boxId, preview: structuredClone(preview), expires });
-    return { actionReference, expiresAt: new Date(expires).toISOString() };
-  }
-
-  take(reference: string, accountId: number, gymId: string) {
-    const entry = this.#entries.get(reference);
-    this.#entries.delete(reference);
-    if (!entry || entry.expires <= Date.now() || entry.accountId !== accountId || entry.preview.gym.id !== gymId) return null;
-    return entry;
-  }
 }
 
 export const exerciseResultDeletionQuerySchema = z.object({

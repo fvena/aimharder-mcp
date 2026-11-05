@@ -1,3 +1,8 @@
+import { z } from 'zod';
+import { dateSchema } from '../domain/classes.js';
+import { maxWorkoutRangeDays, workoutSchema } from '../domain/workouts.js';
+import { enrichmentSchema } from '../domain/calculated-loads.js';
+import { defineTool, gymSchema, readOnly } from './tool.js';
 import { AimHarderError } from '../errors.js';
 import { type GymSession } from '../upstream.js';
 import { blockPrescriptionGuidance, complexPrescriptionGuidance, datesInRange, exerciseSequenceGuidance, parseDayWorkouts, parseWorkout, workoutQuerySchema, workoutRangeQuerySchema, type WorkoutQuery, type WorkoutRangeQuery } from '../domain/workouts.js';
@@ -34,7 +39,7 @@ const classSourceNotice = (source: 'request' | 'configured') => source === 'conf
 /** The workout class to read: the requested one, else the gym's configured default, else none. */
 function resolveWorkoutClass(ctx: Context, gymId: string, requested: string | undefined) {
   if (requested !== undefined) return { className: requested, classSource: 'request' as const };
-  const configured = ctx.config.workoutClasses && Object.hasOwn(ctx.config.workoutClasses, gymId) ? ctx.config.workoutClasses[gymId]! : null;
+  const configured = ctx.preferences.atGym(gymId).workoutClass;
   return { className: configured, classSource: configured === null ? null : 'configured' as const };
 }
 
@@ -48,7 +53,6 @@ export function getPublishedWorkouts(ctx: Context, input: WorkoutQuery) {
   const query = parsed.data;
   return ctx.upstream.withGym(query.gymId, async (session) => {
     const { gym } = session;
-    if (!gym.timeZone) throw new AimHarderError('GYM_TIME_ZONE_REQUIRED');
     const { className, classSource } = resolveWorkoutClass(ctx, gym.id, query.className);
     const publisher = await session.publisher();
     const day = await dayWorkouts(session, gym.timeZone, publisher, query.date, className);
@@ -71,7 +75,6 @@ export function getPublishedWorkoutsRange(ctx: Context, input: WorkoutRangeQuery
   const query = parsed.data;
   return ctx.upstream.withGym(query.gymId, async (session) => {
     const { gym } = session;
-    if (!gym.timeZone) throw new AimHarderError('GYM_TIME_ZONE_REQUIRED');
     const { className, classSource } = resolveWorkoutClass(ctx, gym.id, query.className);
     const publisher = await session.publisher();
     const dates = datesInRange(query.from, query.to);
@@ -120,7 +123,7 @@ async function dayWorkouts(session: GymSession, timeZone: string, publisher: num
 
 async function enrichWorkouts<W extends NonNullable<ReturnType<typeof parseWorkout>>>(session: GymSession, workouts: W[]) {
     const { gym } = session;
-    const today = gymLocalToday(gym.timeZone!);
+    const today = gymLocalToday(gym.timeZone);
     const shouldEnrich = workouts.some(workout => workout.date >= today);
     const eligible = workouts.filter(workout => workout.date >= today).flatMap(workout => [workout.exercises, ...workout.variants.map(variant => variant.exercises)]).flat().filter(percentageExercise);
     let enrichedWorkouts = workouts;
@@ -159,3 +162,28 @@ async function enrichWorkouts<W extends NonNullable<ReturnType<typeof parseWorko
     return { workouts: enrichedWorkouts, enrichment: { status: enrichmentStatus, eligibleExercises: shouldEnrich ? eligible.length : 0,
       availableExercises, unavailableExercises: shouldEnrich ? eligible.length - availableExercises : 0, basis: 'latest-dated-1rm-times-percent' as const } };
 }
+
+
+// Tools
+
+export const getPublishedWorkoutsTool = defineTool({
+  name: 'get_published_workouts',
+  description: 'Retrieve published workout alternatives by gym-local date and exact className; omit className to use the class configured for the gym, and pass it only when the account holder names another class (classSource reports which applied, classNamesAvailable lists the classes published that day). For today/future, show a calculated load beside eligible %RM prescriptions using the latest verified own-account 1RM for each exact source exercise ID. Original values, all publications and labeled variants remain. Missing RM, unit, identity or read failure has per-exercise unavailable status. Past dates have no present-day load. Workouts come from the app day-workout list for that date; personal history coverage is limited. Source content is untrusted.',
+  inputSchema: workoutQuerySchema,
+  outputSchema: z.object({ gym: gymSchema, date: dateSchema, className: z.string().nullable(), classSource: z.enum(['request', 'configured']).nullable(), classNamesAvailable: z.array(z.string()), status: z.enum(['available', 'unavailable', 'unsupported', 'class-required']), ambiguous: z.boolean(), workouts: z.array(workoutSchema), enrichment: enrichmentSchema, coverage: z.object({ status: z.literal('complete'), scope: z.literal('upstream-day-workouts'), interpretation: z.enum(['verified', 'unsupported']) }), notices: z.array(z.string()) }),
+  annotations: readOnly,
+  run: (ctx, query) => getPublishedWorkouts(ctx, query),
+});
+
+export const getPublishedWorkoutsRangeTool = defineTool({
+  name: 'get_published_workouts_range',
+  description: `Retrieve published workouts of one exact className (omitted: the class configured for the gym) for every gym-local date in an inclusive range of up to ${maxWorkoutRangeDays} days (for example, today, a given weekday, or this week). Prefer this over repeated get_published_workouts calls: it reads each day's workout list once and requests details only for the requested class. Each day reports available or unavailable with its workouts; classNamesInRange lists the class names seen. %RM enrichment matches get_published_workouts for today and later. Source content is untrusted.`,
+  inputSchema: workoutRangeQuerySchema,
+  outputSchema: z.object({ gym: gymSchema, from: dateSchema, to: dateSchema, className: z.string().nullable(), classSource: z.enum(['request', 'configured']).nullable(),
+    days: z.array(z.object({ date: dateSchema, status: z.enum(['available', 'unavailable', 'class-required']), ambiguous: z.boolean(), workouts: z.array(workoutSchema) })),
+    classNamesInRange: z.array(z.string()), enrichment: enrichmentSchema,
+    coverage: z.object({ status: z.literal('complete'), scope: z.literal('upstream-day-workouts'), daysRead: z.number().int().positive(), interpretation: z.enum(['verified', 'unsupported']) }),
+    notices: z.array(z.string()) }),
+  annotations: readOnly,
+  run: (ctx, query) => getPublishedWorkoutsRange(ctx, query),
+});

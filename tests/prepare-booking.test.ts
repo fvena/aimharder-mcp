@@ -5,7 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createServer } from '../src/server.js';
 import { appBase, appLogin } from './support/app-api.js';
-import { BookingPreparationStore, bookingWindow, type BookingCreationPreview } from '../src/domain/booking-preparation.js';
+import { bookingWindow } from '../src/domain/booking-preparation.js';
 
 const upstream = setupServer();
 const connections: { client: Client; server: ReturnType<typeof createServer> }[] = [];
@@ -140,32 +140,6 @@ test('malformed schedules fail safely without leaking source data', async () => 
   expect(result.isError).toBe(true);
   expect(result.structuredContent).toBeUndefined();
   expect(JSON.stringify(result)).not.toContain('private-data');
-});
-
-test('action references bind the preview, account, gym and action and are single-use', () => {
-  const store = new BookingPreparationStore();
-  const preview: BookingCreationPreview = { action: 'create', gym: { id: 'sample-gym', name: 'Sample Gym', timeZone: 'Europe/Madrid', timeZoneStatus: 'user-confirmed' },
-    target: { className: 'Open Box', date: '2026-09-26', startTime: '10:00', endTime: '11:00' },
-    currentState: 'unbooked', notices: [] };
-  const first = store.issue(42, 200, 501, preview);
-  preview.target.className = 'Changed';
-  expect(store.take(first.actionReference, 'create', 42, 'sample-gym')).toMatchObject({
-    sourceId: 501, boxId: 200, preview: { target: { className: 'Open Box' } },
-  });
-  expect(store.take(first.actionReference, 'create', 42, 'sample-gym')).toBeNull();
-  const second = store.issue(42, 200, 501, preview);
-  expect(store.take(second.actionReference, 'cancel', 42, 'sample-gym')).toBeNull();
-  const third = store.issue(42, 200, 501, preview);
-  expect(store.take(third.actionReference, 'create', 43, 'sample-gym')).toBeNull();
-  const fourth = store.issue(42, 200, 501, preview);
-  expect(store.take(fourth.actionReference, 'create', 42, 'other-gym')).toBeNull();
-  const fifth = store.issue(42, 200, 501, preview);
-  expect(store.take(fifth.actionReference, 'create', 42, 'sample-gym')).not.toBeNull();
-  const expired = store.issue(42, 200, 501, preview);
-  vi.useFakeTimers();
-  vi.setSystemTime(Date.now() + 120_001);
-  expect(store.take(expired.actionReference, 'create', 42, 'sample-gym')).toBeNull();
-  vi.useRealTimers();
 });
 
 const madridDate = (offsetDays: number) => {

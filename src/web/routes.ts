@@ -1,5 +1,5 @@
 import express, { type NextFunction, type Request, type RequestHandler, type Response } from 'express';
-import { friendsSchema, gymIdSchema, gymSettingsSchema, sortPlan, weekdays, type BookingPlan, type Friends, type GymSettings, type HttpConfiguration, type UserSettings, type Weekday } from '../config.js';
+import { gymIdSchema, gymSettingsSchema, weekdays, type BookingPlan, type Friends, type GymSettings, type HttpConfiguration, type Weekday } from '../config.js';
 import { type Accounts } from '../accounts.js';
 import { getClassParticipants, getClassSessions } from '../features/schedule.js';
 import type { Context } from '../features/context.js';
@@ -86,9 +86,9 @@ function back(res: Response, path: string, section: string, message: string, tar
 }
 
 /** Validate and save settings, then return to that section of the settings page with the outcome. */
-function save(res: Response, section: string, store: () => void, message = 'saved') {
+function save(res: Response, section: string, store: () => void, message = 'saved', invalid = 'invalid') {
   try { store(); }
-  catch { back(res, '/settings', section, 'invalid'); return; }
+  catch { back(res, '/settings', section, invalid); return; }
   back(res, '/settings', section, message);
 }
 
@@ -170,7 +170,6 @@ export function webRouter(config: HttpConfiguration, accounts: Accounts, provide
     } catch { /* without a timetable, the plan can still be read and pruned */ }
     return timetable;
   };
-  const saveFriends = (sub: string, friends: Friends) => accounts.saveUserSettings(sub, { ...accounts.userSettings(sub), friends });
 
   router.get('/assets/app.js', (_req, res) => {
     res.type('text/javascript').set('Cache-Control', 'no-cache').set('X-Content-Type-Options', 'nosniff').send(appScript);
@@ -272,7 +271,7 @@ ${signInForm({ action: `/invite/${encodeURIComponent(token)}`, submit: 'Aceptar 
   router.get('/settings', signedIn, async (req, res) => {
     const sub = res.locals.sub as string;
     const ctx = context(res);
-    const config = accounts.configuration(sub);
+    const config = accounts.preferences(sub);
     const gyms = await gymsOf(ctx);
     const friends = Object.entries(config?.friends ?? {}).sort(([, a], [, b]) => a.name.localeCompare(b.name, 'es'));
     let sections: string;
@@ -281,7 +280,7 @@ ${signInForm({ action: `/invite/${encodeURIComponent(token)}`, submit: 'Aceptar 
       const heading = (gym: Gym) => (gyms.length > 1 ? `<h3>${e(gym.name)}</h3>` : '');
       const plan = `<section id="plan"><h2>Plan semanal de reservas</h2><p class="lead">Las clases que sueles reservar. Con ellas basta con decir «resérvame la semana que viene». Puedes añadir varias el mismo día.</p>${notice(req, 'plan')}
 ${gyms.map((gym) => {
-        const entries: BookingPlan = config.bookingPlans?.[gym.id] ?? [];
+        const entries: BookingPlan = config.bookingPlans[gym.id] ?? [];
         const timetable = timetables.get(gym.id)!;
         const known = (day: Weekday, startTime: string, className: string) => timetable.byDay[day].some((slot) => slot.startTime === startTime && slot.className === className);
         const haveTimetable = timetable.names.length > 0;
@@ -299,9 +298,9 @@ ${haveTimetable ? `<form method="post" action="/settings/plan/add" data-plan><in
 ${gyms.length > 1 ? `<label for="defaultGym">Gimnasio por defecto</label><select id="defaultGym" name="defaultGym">${gyms.map((gym) => `<option value="${e(gym.id)}"${config.defaultGym === gym.id ? ' selected' : ''}>${e(gym.name)}</option>`).join('')}</select>
 <p class="hint">El que se usa cuando no nombras ninguno.</p>` : ''}
 ${gyms.map((gym) => {
-        const current = config.workoutClasses?.[gym.id] ?? '';
+        const current = config.workoutClasses[gym.id] ?? '';
         const names = timetables.get(gym.id)!.names;
-        const options = ['<option value="">Ninguna</option>', ...names.map((name) => `<option value="${e(name)}"${name === current ? ' selected' : ''}>${e(name)}</option>`),
+        const options = [`<option value=""${current ? '' : ' selected'}>Ninguna</option>`, ...names.map((name) => `<option value="${e(name)}"${name === current ? ' selected' : ''}>${e(name)}</option>`),
           ...(current && !names.includes(current) ? [`<option value="${e(current)}" selected>${e(current)} (no aparece en el horario de los próximos siete días)</option>`] : [])];
         return `<label for="workout-${e(gym.id)}">Clase de tu entreno${gyms.length > 1 ? ` en ${e(gym.name)}` : ''}</label>
 <select id="workout-${e(gym.id)}" name="workout:${e(gym.id)}">${options.join('')}</select>
@@ -331,72 +330,51 @@ ${friendList}</section>`);
   router.post('/settings/preferences', sameOrigin, signedIn, form, (req, res) => {
     const sub = res.locals.sub as string;
     const body = req.body as Body;
-    const next: UserSettings = { ...accounts.userSettings(sub) };
-    const workoutClasses = { ...next.workoutClasses };
+    const workoutClasses: Record<string, string | null> = {};
     for (const [key, value] of Object.entries(body)) {
-      if (!key.startsWith('workout:') || typeof value !== 'string') continue;
-      const gymId = key.slice('workout:'.length);
-      if (value.trim()) workoutClasses[gymId] = value.trim(); else delete workoutClasses[gymId];
+      if (key.startsWith('workout:') && typeof value === 'string') workoutClasses[key.slice('workout:'.length)] = value.trim() || null;
     }
-    next.workoutClasses = workoutClasses;
     const filter = field(body, 'participantsFilter');
-    if (filter) next.participantsFilter = filter as 'all' | 'friends';
     const defaultGym = field(body, 'defaultGym');
-    if (defaultGym) next.defaultGym = defaultGym;
-    save(res, 'preferencias', () => accounts.saveUserSettings(sub, next));
+    save(res, 'preferencias', () => accounts.setDefaults(sub, { workoutClasses, ...(filter ? { participantsFilter: filter } : {}), ...(defaultGym ? { defaultGym } : {}) }));
   });
 
-  const savePlan = (sub: string, gymId: string, change: (plan: BookingPlan) => BookingPlan) => {
-    const settings = accounts.userSettings(sub);
-    const current = accounts.configuration(sub)?.bookingPlans?.[gymId] ?? [];
-    accounts.saveUserSettings(sub, { ...settings, bookingPlans: { ...settings.bookingPlans, [gymId]: sortPlan(change(current)) } });
-  };
   router.post('/settings/plan/add', sameOrigin, signedIn, form, (req, res) => {
     const sub = res.locals.sub as string;
     const body = req.body as Body;
     const [day, startTime, ...rest] = field(body, 'slot').split('|');
     const className = rest.join('|');
     if (!day || !startTime || !className || !(weekdays as readonly string[]).includes(day)) { back(res, '/settings', 'plan', 'plan-slot'); return; }
-    save(res, 'plan', () => savePlan(sub, field(body, 'gym'), (plan) => [...plan, { day: day as Weekday, startTime, className }]), 'plan-added');
+    save(res, 'plan', () => accounts.addPlanEntry(sub, field(body, 'gym'), { day: day as Weekday, startTime, className }), 'plan-added');
   });
   router.post('/settings/plan/remove', sameOrigin, signedIn, form, (req, res) => {
     const sub = res.locals.sub as string;
     const body = req.body as Body;
     const [day, startTime, className] = [field(body, 'day'), field(body, 'startTime'), field(body, 'className')];
-    save(res, 'plan', () => savePlan(sub, field(body, 'gym'), (plan) => plan.filter((entry) => !(entry.day === day && entry.startTime === startTime && entry.className === className))), 'plan-removed');
+    save(res, 'plan', () => accounts.removePlanEntry(sub, field(body, 'gym'), { day: day as Weekday, startTime, className }), 'plan-removed');
   });
 
   router.post('/settings/friends/add', sameOrigin, signedIn, form, (req, res) => {
     const sub = res.locals.sub as string;
     const body = req.body as Body;
-    const friends: Friends = { ...accounts.configuration(sub)?.friends };
     const ids = list(body, 'friend').map((id) => id.trim());
-    for (const id of ids) {
+    if (!ids.length) { back(res, '/settings', 'amigos', 'friend'); return; }
+    const added: Friends = Object.fromEntries(ids.map((id) => {
       const photoUrl = field(body, `photo:${id}`);
-      friends[id] = { name: field(body, `name:${id}`), ...(photoUrl ? { photoUrl } : {}) };
-    }
-    const parsed = friendsSchema.safeParse(friends);
-    if (!ids.length || !parsed.success) { back(res, '/settings', 'amigos', 'friend'); return; }
-    save(res, 'amigos', () => saveFriends(sub, parsed.data), 'friends-added');
+      return [id, { name: field(body, `name:${id}`), ...(photoUrl ? { photoUrl } : {}) }];
+    }));
+    save(res, 'amigos', () => accounts.addFriends(sub, added), 'friends-added', 'friend');
   });
   // Every friend's name, from one form: `name:<id>` for each friend shown.
   router.post('/settings/friends/rename', sameOrigin, signedIn, form, (req, res) => {
     const sub = res.locals.sub as string;
     const body = req.body as Body;
-    const friends: Friends = { ...accounts.configuration(sub)?.friends };
-    for (const key of Object.keys(body)) {
-      const id = key.startsWith('name:') ? key.slice('name:'.length) : '';
-      if (id && Object.hasOwn(friends, id)) friends[id] = { ...friends[id]!, name: field(body, key) };
-    }
-    const parsed = friendsSchema.safeParse(friends);
-    if (!parsed.success) { back(res, '/settings', 'amigos', 'friend'); return; }
-    save(res, 'amigos', () => saveFriends(sub, parsed.data));
+    const names = Object.fromEntries(Object.keys(body).filter((key) => key.startsWith('name:')).map((key) => [key.slice('name:'.length), field(body, key)]));
+    save(res, 'amigos', () => accounts.renameFriends(sub, names), 'saved', 'friend');
   });
   router.post('/settings/friends/remove', sameOrigin, signedIn, form, (req, res) => {
     const sub = res.locals.sub as string;
-    const friends: Friends = { ...accounts.configuration(sub)?.friends };
-    delete friends[field(req.body as Body, 'id')];
-    save(res, 'amigos', () => saveFriends(sub, friends), 'friend-removed');
+    save(res, 'amigos', () => accounts.removeFriend(sub, field(req.body as Body, 'id')), 'friend-removed');
   });
 
   // Find friends among the participants of a class: pick a day, then a class, then the people.
@@ -408,22 +386,17 @@ ${friendList}</section>`);
       layout(res, 503, 'Añadir amigos', 'settings', '<h1>Añadir amigos</h1><p class="error">No se ha podido consultar tu cuenta en AimHarder. Recarga la página en unos minutos.</p><p><a href="/settings#amigos">Volver a Ajustes</a></p>');
       return;
     }
-    const gym = gyms.find((entry) => entry.id === query(req, 'gym')) ?? gyms.find((entry) => entry.id === ctx.config.defaultGym) ?? gyms[0]!;
+    const gym = gyms.find((entry) => entry.id === query(req, 'gym')) ?? gyms.find((entry) => entry.id === accounts.preferences(sub)?.defaultGym) ?? gyms[0]!;
     const date = /^\d{4}-\d{2}-\d{2}$/.test(query(req, 'date')) ? query(req, 'date') : today(gym.timeZone);
     let content = '';
     try {
       if (query(req, 'class') && query(req, 'time')) {
         const result = await getClassParticipants(ctx, { date, className: query(req, 'class'), startTime: query(req, 'time'), gymId: gym.id, filter: 'all' });
         const { accountId } = await ctx.upstream.account();
-        const friends: Friends = { ...accounts.configuration(sub)?.friends };
+        const friends: Friends = { ...accounts.preferences(sub)?.friends };
         const people = result.participants.filter((participant) => participant.userId !== accountId);
         // Keep friends' pictures current with what AimHarder shows now.
-        let refreshed = false;
-        for (const person of people) {
-          const friend = friends[String(person.userId)];
-          if (friend && person.photoUrl && friend.photoUrl !== person.photoUrl) { friends[String(person.userId)] = { ...friend, photoUrl: person.photoUrl }; refreshed = true; }
-        }
-        if (refreshed) saveFriends(sub, friends);
+        accounts.refreshFriendPhotos(sub, Object.fromEntries(people.flatMap((person) => (person.photoUrl ? [[String(person.userId), person.photoUrl]] : []))));
         const backToDay = `<a class="button start" href="/settings/friends/find?gym=${e(encodeURIComponent(gym.id))}&amp;date=${e(date)}">Volver a las clases del día</a>`;
         const anyNew = people.some((person) => !Object.hasOwn(friends, String(person.userId)));
         content = `<h2>${e(query(req, 'class'))} · ${e(query(req, 'time'))}</h2>${people.length ? `<form method="post" action="/settings/friends/add"><fieldset class="plain"><legend class="sr-only">Personas apuntadas</legend>${people.map((person) => {

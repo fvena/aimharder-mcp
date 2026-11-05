@@ -94,6 +94,7 @@ async function start() {
   const { app, config, close } = createHttpApp({
     AIMHARDER_USERNAME: people.owner.username, AIMHARDER_PASSWORD: people.owner.password,
     AIMHARDER_BOOKING_PLAN: '{"sample-gym":[{"day":"mon","className":"CROSS","startTime":"07:00"}]}',
+    AIMHARDER_WORKOUT_CLASS: '{"sample-gym":"CROSS"}',
     MCP_PUBLIC_URL: base, MCP_OWNER_SECRET: ownerSecret, PORT: String(port), MCP_DATA_DIR: dataDir,
   });
   const server = await new Promise<HttpServer>((resolve) => { const s = app.listen(config.port, '127.0.0.1', () => resolve(s)); });
@@ -233,7 +234,7 @@ test('each account edits its own plan, preferences and friends, and the connecto
   const page = await (await get('/settings', cookie)).text();
   expect(page).toContain('Plan semanal');
   expect(page).toContain('<option value="tue|07:00|CROSS">07:00 · CROSS</option>');
-  expect(page).toContain('<option value="CROSS">CROSS</option>');
+  expect(page).toContain('<option value="CROSS" selected>CROSS</option>');
   expect(page).not.toContain('Gimnasio por defecto');
   expect(page).toContain('<script src="/assets/app.js" defer></script>');
   expect((await get('/assets/app.js')).headers.get('content-type')).toContain('text/javascript');
@@ -365,4 +366,26 @@ test('tokens issued before accounts existed keep working as the owner\'s', async
   whoami.length = 0;
   expect((await accountContext(legacy)).structuredContent).toMatchObject({ defaults: { bookingPlan: [{ day: 'mon', className: 'CROSS' }] } });
   expect(whoami).toEqual([42]);
+});
+
+test('the owner edits a plan that starts from the environment, and the environment entries stay in it', async () => {
+  const cookie = await signIn(people.owner);
+  expect((await post('/settings/plan/add', { gym: 'sample-gym', day: 'tue', slot: 'tue|07:00|CROSS' }, cookie)).status).toBe(303);
+  const owner = await connect(people.owner);
+  const result = await accountContext(owner.accessToken!);
+  expect(result.structuredContent).toMatchObject({ defaults: { bookingPlan: [
+    { day: 'mon', className: 'CROSS', startTime: '07:00' }, { day: 'tue', className: 'CROSS', startTime: '07:00' },
+  ] } });
+  expect((await post('/settings/plan/remove', { gym: 'sample-gym', day: 'mon', startTime: '07:00', className: 'CROSS' }, cookie)).status).toBe(303);
+  const after = await accountContext((await connect(people.owner)).accessToken!);
+  expect(after.structuredContent).toMatchObject({ defaults: { bookingPlan: [{ day: 'tue', className: 'CROSS', startTime: '07:00' }] } });
+});
+
+test('the owner can clear a workout class that comes from the environment', async () => {
+  const cookie = await signIn(people.owner);
+  const owner = await connect(people.owner);
+  expect((await accountContext(owner.accessToken!)).structuredContent).toMatchObject({ defaults: { workoutClass: 'CROSS' } });
+  expect((await post('/settings/preferences', { 'workout:sample-gym': '' }, cookie)).status).toBe(303);
+  expect((await accountContext((await connect(people.owner)).accessToken!)).structuredContent).toMatchObject({ defaults: { workoutClass: null } });
+  expect(await (await get('/settings', cookie)).text()).toContain('<option value="" selected>Ninguna</option>');
 });
