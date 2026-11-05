@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { applySettings, gymSettingsSchema, userSettingsSchema, type BookingPlan, type Configuration, type Friends, type GymSettings, type ParticipantsFilterValue, type UserSettings } from './config.js';
+import { applySettings, gymSettingsSchema, sortPlan, userSettingsSchema, type BookingPlan, type Configuration, type Friends, type GymSettings, type ParticipantsFilterValue, type PlanEntry, type UserSettings } from './config.js';
 import { AimHarderError } from './errors.js';
 import { createContext, type Context } from './features/context.js';
 import { memberScope, type Member, type Store } from './store.js';
@@ -56,9 +56,10 @@ export class Accounts {
     return context;
   }
 
-  #configuration(sub: string): Configuration | undefined {
+  /** The account's configuration: the environment, the gym rules and its own settings (`own`, else the stored ones). */
+  #configuration(sub: string, own = this.#userSettings(sub)): Configuration | undefined {
     const gym = this.gymSettings();
-    if (sub === ownerSub) return applySettings(this.base, gym, this.#userSettings(sub));
+    if (sub === ownerSub) return applySettings(this.base, gym, own);
     const id = memberId(sub);
     const credentials = id === undefined ? undefined : this.store.credentials(id);
     if (!credentials) return undefined;
@@ -66,7 +67,7 @@ export class Accounts {
     const base: Configuration = {
       ...this.base, ...credentials, defaultGym: undefined, bookingPlans: {}, friends: {}, participantsFilter: 'all', requireBookingConfirmation: true,
     };
-    return applySettings(base, gym, this.#userSettings(sub));
+    return applySettings(base, gym, own);
   }
 
   gymSettings(): GymSettings { return this.store.settings(gymScope, gymSettingsSchema, {}); }
@@ -84,42 +85,75 @@ export class Accounts {
   /** The account holder's own preferences as they apply now: the environment's (for the owner) under their own settings. */
   preferences(sub: string): EditablePreferences | undefined {
     const config = this.#configuration(sub);
-    if (!config) return undefined;
-    return {
-      defaultGym: config.defaultGym, workoutClasses: { ...config.workoutClasses }, bookingPlans: { ...config.bookingPlans },
-      participantsFilter: config.participantsFilter ?? 'all', friends: { ...config.friends },
-    };
+    return config && editable(config);
+  }
+
+  // Changes to an account's own preferences. Each validates the result and saves it as the account's own settings, or
+  // throws and saves nothing; a change that alters nothing that applies is not saved. A gym's plan and the friends list
+  // are saved whole once edited, so entries that came from the environment stay in them; other values keep following
+  // the environment until the account holder changes them.
+
+  /** Add a class to a gym's weekly plan, in weekday and start-time order, without duplicates. */
+  addPlanEntry(sub: string, gymId: string, entry: PlanEntry) {
+    this.#change(sub, (own, current) => ({ ...own, bookingPlans: { ...own.bookingPlans, [gymId]: sortPlan([...current.bookingPlans[gymId] ?? [], entry]) } }));
+  }
+
+  /** Remove a class from a gym's weekly plan. */
+  removePlanEntry(sub: string, gymId: string, entry: PlanEntry) {
+    const same = (other: PlanEntry) => other.day === entry.day && other.startTime === entry.startTime && other.className === entry.className;
+    this.#change(sub, (own, current) => ({ ...own, bookingPlans: { ...own.bookingPlans, [gymId]: (current.bookingPlans[gymId] ?? []).filter((other) => !same(other)) } }));
   }
 
   /**
-   * Change the account holder's own preferences. `change` receives them as they apply now and returns them changed.
-   * Only what changed becomes the account's own settings: a gym's workout class or plan, the friends, the filter or the
-   * default gym. Values left alone keep following the environment. Throws when a value is invalid; nothing is saved then.
+   * Set the defaults the assistant applies: by gym, the workout class (null for none, even when the environment sets one),
+   * the participants filter and the default gym. Values not given, or equal to what applies now, are left as they are.
    */
-  updatePreferences(sub: string, change: (current: EditablePreferences) => EditablePreferences) {
-    const scope = settingsScope(sub);
-    const current = this.preferences(sub);
-    if (!scope || !current) return;
-    const next = change(structuredClone(current));
-    const own = this.#userSettings(sub);
-    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
-    const perGym = <T>(stored: Record<string, T> | undefined, before: Record<string, T>, after: Record<string, T>) => {
-      const result = { ...stored };
-      for (const gymId of new Set([...Object.keys(before), ...Object.keys(after)])) {
-        if (same(before[gymId], after[gymId])) continue;
-        if (Object.hasOwn(after, gymId)) result[gymId] = after[gymId]!; else delete result[gymId];
-      }
-      return result;
-    };
-    const settings: UserSettings = userSettingsSchema.parse({
-      ...own,
-      workoutClasses: perGym(own.workoutClasses, current.workoutClasses, next.workoutClasses),
-      bookingPlans: perGym(own.bookingPlans, current.bookingPlans, next.bookingPlans),
-      ...(same(current.friends, next.friends) ? {} : { friends: next.friends }),
-      ...(current.participantsFilter === next.participantsFilter ? {} : { participantsFilter: next.participantsFilter }),
-      ...(current.defaultGym === next.defaultGym || next.defaultGym === undefined ? {} : { defaultGym: next.defaultGym }),
+  setDefaults(sub: string, defaults: { workoutClasses?: Record<string, string | null>; participantsFilter?: string; defaultGym?: string }) {
+    this.#change(sub, (own, current) => {
+      const workoutClasses = Object.entries(defaults.workoutClasses ?? {}).filter(([gymId, className]) => (current.workoutClasses[gymId] ?? null) !== className);
+      return {
+        ...own,
+        ...(workoutClasses.length ? { workoutClasses: { ...own.workoutClasses, ...Object.fromEntries(workoutClasses) } } : {}),
+        ...(defaults.participantsFilter === undefined || defaults.participantsFilter === current.participantsFilter ? {} : { participantsFilter: defaults.participantsFilter as ParticipantsFilterValue }),
+        ...(defaults.defaultGym === undefined || defaults.defaultGym === current.defaultGym ? {} : { defaultGym: defaults.defaultGym }),
+      };
     });
-    this.store.saveSettings(scope, settings);
+  }
+
+  /** Add friends, or update the name and picture of ones already listed. */
+  addFriends(sub: string, friends: Friends) {
+    this.#changeFriends(sub, (current) => ({ ...current, ...friends }));
+  }
+
+  /** Rename listed friends by user ID; IDs that are not friends are ignored. */
+  renameFriends(sub: string, names: Record<string, string>) {
+    this.#changeFriends(sub, (current) => Object.fromEntries(Object.entries(current)
+      .map(([id, friend]) => [id, Object.hasOwn(names, id) ? { ...friend, name: names[id]! } : friend])));
+  }
+
+  removeFriend(sub: string, id: string) {
+    this.#changeFriends(sub, (current) => Object.fromEntries(Object.entries(current).filter(([friendId]) => friendId !== id)));
+  }
+
+  /** Keep friends' pictures as AimHarder shows them now. */
+  refreshFriendPhotos(sub: string, photos: Record<string, string>) {
+    this.#changeFriends(sub, (current) => Object.fromEntries(Object.entries(current)
+      .map(([id, friend]) => [id, Object.hasOwn(photos, id) ? { ...friend, photoUrl: photos[id]! } : friend])));
+  }
+
+  #changeFriends(sub: string, change: (current: Friends) => Friends) {
+    this.#change(sub, (own, current) => ({ ...own, friends: change(current.friends) }));
+  }
+
+  #change(sub: string, change: (own: UserSettings, current: EditablePreferences) => UserSettings) {
+    const scope = settingsScope(sub);
+    const config = this.#configuration(sub);
+    if (!scope || !config) return;
+    const current = editable(config);
+    const next = userSettingsSchema.parse(change(this.#userSettings(sub), current));
+    const after = this.#configuration(sub, next);
+    if (after && JSON.stringify(editable(after)) === JSON.stringify(current)) return;
+    this.store.saveSettings(scope, next);
     this.#contexts.delete(sub);
   }
 
@@ -175,6 +209,15 @@ export class Accounts {
     const digest = (value: string) => createHash('sha256').update(value).digest();
     return timingSafeEqual(digest(password), digest(this.base.password));
   }
+}
+
+/** The preferences an account holder edits, as they apply in a configuration; a workout class of none is left out. */
+function editable(config: Configuration): EditablePreferences {
+  const workoutClasses = Object.fromEntries(Object.entries(config.workoutClasses ?? {}).filter((entry): entry is [string, string] => entry[1] !== null));
+  return {
+    defaultGym: config.defaultGym, workoutClasses, bookingPlans: { ...config.bookingPlans },
+    participantsFilter: config.participantsFilter ?? 'all', friends: { ...config.friends },
+  };
 }
 
 const memberId = (sub: string) => (/^[1-9]\d{0,15}$/.test(sub) ? Number(sub) : undefined);

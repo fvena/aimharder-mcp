@@ -147,10 +147,6 @@ function staleCreation(gym: Gym, target: ClassTime, observedState: BookingState,
   return { action: 'create', gym, target, status: 'stale', observedState, notices: [notice] };
 }
 
-export function executeBookingCreation(ctx: Context, input: unknown) {
-  return ctx.writes.execute(bookingCreation, input);
-}
-
 
 export function prepareBookingCancellation(ctx: Context, input: BookingCancellationQuery) {
   const parsed = bookingCancellationQuerySchema.safeParse(input);
@@ -258,15 +254,6 @@ function cancellation(late: boolean): WriteAction<CancellationPlan, Cancellation
 const standardCancellation = cancellation(false);
 const lateCancellation = cancellation(true);
 
-export function executeBookingCancellation(ctx: Context, input: unknown) {
-  return ctx.writes.execute(standardCancellation, input);
-}
-
-export function executeLateBookingCancellation(ctx: Context, input: unknown) {
-  // A late attempt never warns again: only a standard cancellation reports pending-credit-loss.
-  return ctx.writes.execute(lateCancellation, input) as Promise<CancellationResult & { status: Exclude<CancellationStatus, 'pending-credit-loss'> }>;
-}
-
 
 export function getUpcomingBookings(ctx: Context, gymId?: string) {
   return ctx.upstream.withGym(gymId, 'box', async (session) => {
@@ -332,7 +319,7 @@ export const executeBookingCreationTool = defineTool({
     notices: z.array(z.string()),
   }),
   annotations: write,
-  run: (ctx, query) => executeBookingCreation(ctx, query),
+  run: (ctx, query) => ctx.writes.execute(bookingCreation, query),
 });
 
 const plannedTarget = z.object({ className: z.string(), date: dateSchema, startTime: z.string(), endTime: z.string().nullable() });
@@ -378,7 +365,7 @@ export const executeBookingCancellationTool = defineTool({
     actionReference: z.string().optional(), expiresAt: z.string().optional(),
   }),
   annotations: destructiveWrite,
-  run: (ctx, query) => executeBookingCancellation(ctx, query),
+  run: (ctx, query) => ctx.writes.execute(standardCancellation, query),
 });
 
 export const executeLateBookingCancellationTool = defineTool({
@@ -391,7 +378,8 @@ export const executeLateBookingCancellationTool = defineTool({
     credit: z.object({ possibleLoss: z.string(), balance: z.null(), entitlementPeriod: z.null() }), notices: z.array(z.string()),
   }),
   annotations: destructiveWrite,
-  run: (ctx, query) => executeLateBookingCancellation(ctx, query),
+  // A late attempt never warns again: only a standard cancellation reports pending-credit-loss.
+  run: (ctx, query) => ctx.writes.execute(lateCancellation, query) as Promise<CancellationResult & { status: Exclude<CancellationStatus, 'pending-credit-loss'> }>,
 });
 
 export const getUpcomingBookingsTool = defineTool({

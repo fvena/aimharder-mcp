@@ -123,10 +123,6 @@ const resultSaving: WriteAction<ExerciseResultPreview, SavingResult> = {
   },
 };
 
-export function executeExerciseResult(ctx: Context, input: unknown) {
-  return ctx.writes.execute(resultSaving, input);
-}
-
 
 export function prepareExerciseResultDeletion(ctx: Context, input: ExerciseResultDeletionQuery) {
   const parsed = exerciseResultDeletionQuerySchema.safeParse(input);
@@ -174,10 +170,6 @@ const resultDeletion: WriteAction<ExerciseResultDeletionPreview, DeletionResult>
   },
 };
 
-export function executeExerciseResultDeletion(ctx: Context, input: unknown) {
-  return ctx.writes.execute(resultDeletion, input);
-}
-
 
 async function ownActivityIds(session: GymSession | BoxSession, date: string) {
   const month = date.slice(0, 7);
@@ -206,7 +198,7 @@ export const executeExerciseResultTool = defineTool({
   outputSchema: z.object({ status: z.enum(['confirmed', 'rejected', 'uncertain', 'stale']), activityId: z.number().nullable(),
     gym: gymSchema, preview: previewSchema.extend({ gym: z.object({ id: z.string(), name: z.string(), timeZone: z.string() }) }), notices: z.array(z.string()) }),
   annotations: write,
-  run: (ctx, query) => executeExerciseResult(ctx, query),
+  run: (ctx, query) => ctx.writes.execute(resultSaving, query),
 });
 
 const deletionPreviewSchema = z.object({ gym: z.object({ id: z.string(), name: z.string(), timeZone: z.string() }), date: dateSchema, activityId: z.number(),
@@ -228,7 +220,7 @@ export const executeExerciseResultDeletionTool = defineTool({
   inputSchema: exerciseResultDeletionExecutionSchema,
   outputSchema: z.object({ status: z.enum(['confirmed', 'stale', 'uncertain']), gym: gymSchema, preview: deletionPreviewSchema, notices: z.array(z.string()) }),
   annotations: destructiveWrite,
-  run: (ctx, query) => executeExerciseResultDeletion(ctx, query),
+  run: (ctx, query) => ctx.writes.execute(resultDeletion, query),
 });
 
 export const getPersonalActivityTool = defineTool({
