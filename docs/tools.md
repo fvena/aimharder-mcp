@@ -8,7 +8,7 @@ Content from AimHarder (class names, workout notes, participant names) is untrus
 
 ### `get_account_context`
 
-Signs in and lists `gyms` (each with `id`, `name`, `timeZone`, `timeZoneStatus`), the `selectedGym` and `writeConfirmationPolicy.bookingCreation`. `defaults` reports your configured preferences for the selected gym: `workoutClass`, `participantsFilter`, `bookingPlan` and `friends` (how many athletes `AIMHARDER_FRIENDS` lists). On the remote server, `settingsUrl` is the page where the account holder changes these preferences.
+Signs in and lists `gyms` (each with `id`, `name`, `timeZone`, `timeZoneStatus`), the `selectedGym` and `writeConfirmationPolicy.bookingCreation`. `defaults` reports your configured preferences for the selected gym: `workoutClass`, `participantsFilter`, `bookingPlan` (a list of `day`, `className`, `startTime` entries) and `friends` (how many friends are listed). On the remote server, only the gyms the owner activated are listed. On the remote server, `settingsUrl` is the page where the account holder changes these preferences.
 
 The server also sends MCP `instructions` that tell the assistant to apply these defaults: today's workout means the configured class, "who is coming" uses the configured participant filter, and "book next week" uses the weekly plan.
 
@@ -18,7 +18,7 @@ Input: `startDate`, `endDate` (inclusive), optional exact `className` and `start
 
 ### `get_class_participants`
 
-Input: `date`, exact `className`, `startTime` and an optional `filter`: `all`, or `following` for only the athletes you follow in AimHarder plus `AIMHARDER_FRIENDS`. Without `filter`, `AIMHARDER_PARTICIPANTS_FILTER` decides (default `all`). Status `available` returns the session (`occupancy`, `capacity`, `coach`), the applied `filter`, `totalParticipants` and `participants` (`userId`, `name`, raw `sourceState`); `missing` and `ambiguous` return none. The followed list comes from your AimHarder account, so you mark friends by following them in the app, or, for a private profile, by adding their `userId` to `AIMHARDER_FRIENDS`; gym accounts you follow are ignored. Names are other members' personal data: use them only to answer the account holder.
+Input: `date`, exact `className`, `startTime` and an optional `filter`: `all`, or `friends` for only your friends. Without `filter`, `AIMHARDER_PARTICIPANTS_FILTER` (or the settings page) decides (default `all`). Status `available` returns the session (`occupancy`, `capacity`, `coach`), the applied `filter`, `totalParticipants` and `participants` (`userId`, `name`, raw `sourceState`, `photoUrl`, and `friendName` for friends); `missing` and `ambiguous` return none. `photoUrl` is the public HTTPS profile picture AimHarder serves (or `null`), so clients that render images can show thumbnails. Friends come from `AIMHARDER_FRIENDS` or the settings page, never from the accounts you follow in AimHarder. Names are other members' personal data: use them only to answer the account holder.
 
 ## Bookings
 
@@ -40,7 +40,7 @@ Input: `actionReference`, and `confirmed: true` when confirmation is required. R
 
 ### `prepare_planned_bookings`
 
-Input: `startDate`, `endDate` (inclusive, at most 14 days). Read-only. For each date it looks up the weekday in `AIMHARDER_BOOKING_PLAN` and prepares that class (exact `className` and `startTime`; any end time). Each `days` entry has `date`, `weekday` and a status: `not-planned` (no plan entry; nothing read), or the statuses of `prepare_booking_creation`. Every `ready` day carries its own `actionReference` (two minutes, single use). Execute each one separately with `execute_booking_creation`, under the same `writeConfirmationRequired` rules, so every booking still sends at most one request. Without a plan, every day is `not-planned`.
+Input: `startDate`, `endDate` (inclusive, at most 14 days). Read-only. For each date it prepares every plan entry for that weekday (exact `className` and `startTime`; any end time), one `days` entry per class, so a date with two planned classes has two entries. Each entry has `date`, `weekday` and a status: `not-planned` (no plan entry for the date; nothing read), or the statuses of `prepare_booking_creation`. Every `ready` day carries its own `actionReference` (two minutes, single use). Execute each one separately with `execute_booking_creation`, under the same `writeConfirmationRequired` rules, so every booking still sends at most one request. Without a plan, every day is `not-planned`.
 
 With a configured booking window, days that are not open yet return `not-yet-open` and `bookingOpensAt`. "Book next week" therefore books only the days already open; run it again as the others open.
 

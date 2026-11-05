@@ -55,7 +55,7 @@ fly scale count 1
 
 #### Upgrading a deployment from before accounts
 
-Earlier versions stored nothing and approved connections with the owner secret. To upgrade, create the volume once, then deploy:
+Earlier versions stored nothing and approved connections with the owner secret. (Data files from the first multi-account version are upgraded on start: members, invitations and gym rules stay, and personal settings in the old plan, friends and filter formats are cleared, to be entered again on the settings page.) To upgrade, create the volume once, then deploy:
 
 ```sh
 fly volumes create aimharder_data --region ams --size 1 -a <app>
@@ -108,13 +108,14 @@ Then authenticate from `/mcp`.
 
 ## 4. Invite friends and change settings
 
-Every account has a settings page at `<MCP_PUBLIC_URL>/settings` (sign in with AimHarder): default gym, workout class, participant filter, weekly booking plan and friends, with a finder that lists a class's participants to add friends with private profiles. `get_account_context` reports this URL as `settingsUrl`. See [configuration](configuration.md#settings-page-http-only) for how these settings combine with the environment.
+Every account has a settings page at `<MCP_PUBLIC_URL>/settings` (sign in with AimHarder): default gym (with several active gyms), workout class and weekly booking plan chosen from the gym's timetable (several classes per day allowed), participant filter, and friends. Friends are added by ticking them among a class's participants; their name can be changed to the one you know them by, and their AimHarder picture is shown and refreshed when they appear again. The plan form uses one small script from the server to show only the chosen weekday's classes, and works without it. `get_account_context` reports this URL as `settingsUrl`. See [configuration](configuration.md#settings-page-http-only) for how these settings combine with the environment.
 
 The owner also has `/admin`:
 
 - **Invitar**: creates a single-use link, valid for seven days, for a named person. The link is shown once. The person opens it, signs in with their AimHarder account, and gets a page with the connector address and the steps for Claude and ChatGPT.
 - **Personas con acceso**: lists members and removes them. Removing a member deletes their stored credentials and settings and invalidates their tokens and sessions.
-- **Reglas del gimnasio**: time zone, booking window and cancellation window per gym, for every account.
+- **Gimnasios**: the gyms the server uses, chosen among the owner's. The others disappear for every account, and invitations from people with none of them are refused.
+- **Reglas del gimnasio**: time zone, booking window and cancellation window per active gym, for every account.
 
 The pages are in Spanish, for the gym's members.
 
