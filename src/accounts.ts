@@ -62,6 +62,11 @@ export class Accounts {
 
   gymSettings(): GymSettings { return this.store.settings(gymScope, gymSettingsSchema, {}); }
 
+  /** The gym rules from the environment, which apply where the owner has not set one. */
+  serverGymRules() {
+    return { gymTimeZones: this.base.gymTimeZones, bookingWindowDays: this.base.bookingWindowDays ?? {}, cancellationWindowMinutes: this.base.cancellationWindowMinutes ?? {} };
+  }
+
   saveGymSettings(settings: GymSettings) {
     this.store.saveSettings(gymScope, gymSettingsSchema.parse(settings));
     this.#contexts.clear();

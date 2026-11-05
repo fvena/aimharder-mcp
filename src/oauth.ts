@@ -9,7 +9,7 @@ import type { OAuthClientInformationFull, OAuthTokens } from '@modelcontextproto
 import { InvalidClientMetadataError, InvalidGrantError, InvalidTargetError, InvalidTokenError } from '@modelcontextprotocol/sdk/server/auth/errors.js';
 import { isAllowedRedirectUri, type HttpConfiguration } from './config.js';
 import { ownerSub, type Accounts, type SignInError } from './accounts.js';
-import { escapeHtml, sendPage } from './web/html.js';
+import { escapeHtml, sendPublicPage, signInForm } from './web/html.js';
 
 const accessTokenSeconds = 60 * 60;
 const refreshTokenSeconds = 30 * 24 * 60 * 60;
@@ -207,25 +207,17 @@ export class AccountsOAuthProvider implements OAuthServerProvider {
 }
 
 const denials: Record<ApprovalDenial, string> = {
-  credentials: 'El correo o la contraseña de AimHarder no son correctos.',
+  credentials: 'El correo o la contraseña no son correctos. Usa los mismos que en la app de AimHarder.',
   'not-invited': 'Esta cuenta de AimHarder no tiene acceso a este servidor. Pide una invitación a quien lo administra.',
-  unavailable: 'No se ha podido comprobar la cuenta con AimHarder. Inténtalo de nuevo en unos minutos.',
+  unavailable: 'No se ha podido comprobar tu cuenta porque AimHarder no responde. Inténtalo de nuevo en unos minutos.',
 };
 
 /** Approval page. The client name is untrusted and shown escaped; the redirect host shows where access is granted. */
 export function sendApprovalPage(res: Response, page: { approval: string; clientName?: string | undefined; redirectUri: string; denial?: ApprovalDenial }) {
   const host = new URL(page.redirectUri).host;
   const client = page.clientName ? `<strong>${escapeHtml(page.clientName)}</strong> (${escapeHtml(host)})` : `<strong>${escapeHtml(host)}</strong>`;
-  sendPage(res, page.denial ? 401 : 200, 'Autorizar AimHarder MCP', `<h1>Autorizar AimHarder MCP</h1>
-<p>${client} quiere usar este servidor con tu cuenta: podrá consultar tus clases, reservas, entrenamientos y resultados, y preparar reservas, cancelaciones y resultados que confirmarás en el chat.</p>
-<p>Entra con tu cuenta de AimHarder.</p>
-${page.denial ? `<p class="error">${escapeHtml(denials[page.denial])}</p>` : ''}
-<form method="post" action="/authorize/approve">
-<input type="hidden" name="approval" value="${escapeHtml(page.approval)}">
-<label for="username">Correo de AimHarder</label>
-<input id="username" name="username" type="email" autocomplete="username" required autofocus>
-<label for="password">Contraseña de AimHarder</label>
-<input id="password" name="password" type="password" autocomplete="current-password" required>
-<button type="submit">Autorizar</button>
-</form>`);
+  sendPublicPage(res, page.denial ? 401 : 200, 'Autorizar AimHarder MCP', `<h1>Autorizar AimHarder MCP</h1>
+<section><p>${client} quiere usar este servidor con tu cuenta: podrá consultar tus clases, reservas, entrenamientos y resultados, y preparar reservas, cancelaciones y resultados que confirmarás en el chat.</p>
+<p class="lead">Entra con el mismo correo y contraseña que usas en la app de AimHarder.</p>
+${signInForm({ action: '/authorize/approve', submit: 'Autorizar', error: page.denial ? denials[page.denial] : undefined, hidden: { approval: page.approval } })}</section>`);
 }
