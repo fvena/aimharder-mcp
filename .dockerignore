@@ -1,0 +1,14 @@
+.git
+.github
+node_modules
+dist
+coverage
+tests
+docs
+evidence
+.env
+.env.*
+*.pem
+*.key
+*.har
+.local-*.mjs

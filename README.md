@@ -1,6 +1,6 @@
 # aimharder-mcp
 
-A local [MCP server](https://modelcontextprotocol.io/) for one AimHarder account. Ask an AI client about classes and who is attending them, published workouts, bookings, personal activity and RMs. It can also make and cancel bookings, and save or delete strength results (PRs), always after your explicit confirmation.
+An [MCP server](https://modelcontextprotocol.io/) for one AimHarder account, run locally or deployed as your own remote connector for Claude and ChatGPT. Ask an AI client about classes and who is attending them, published workouts, bookings, personal activity and RMs. It can also make and cancel bookings, and save or delete strength results (PRs), always after your explicit confirmation.
 
 It is an independent project, neither affiliated with nor endorsed by AimHarder. It talks to AimHarder's own web and mobile-app APIs, which are undocumented and can change without notice. See [docs/aimharder-api.md](docs/aimharder-api.md).
 
@@ -38,6 +38,10 @@ It is an independent project, neither affiliated with nor endorsed by AimHarder.
    ```
 
 The first tool call signs in. Use `get_account_context` to see your gym IDs and time zones. See [configuration](docs/configuration.md) for details.
+
+## Use it from Claude or ChatGPT on the web and mobile
+
+Deploy your own instance (the [Dockerfile](Dockerfile) works on Fly.io, Render, Railway and similar platforms, or on your computer behind a tunnel) with `MCP_TRANSPORT=http`, `MCP_PUBLIC_URL` and an `MCP_OWNER_SECRET`. Then add `https://<your-host>/mcp` as a custom connector in Claude or as an app in ChatGPT developer mode, and approve it with your owner secret. Each person runs an instance for their own account; credentials stay in their own platform secrets. See [remote use](docs/remote.md).
 
 ## Tools
 

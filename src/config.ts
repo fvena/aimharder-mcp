@@ -52,3 +52,62 @@ export function readConfiguration(environment: Record<string, string | undefined
     defaultGym: parsed.data.AIMHARDER_DEFAULT_GYM,
   };
 }
+
+const loopbackHosts = new Set(['localhost', '127.0.0.1', '[::1]']);
+const isLoopback = (url: URL) => loopbackHosts.has(url.hostname);
+const urlSchema = z.string().refine((value) => URL.canParse(value)).transform((value) => new URL(value));
+const publicUrlSchema = urlSchema.refine((url) =>
+  (url.protocol === 'https:' || (url.protocol === 'http:' && isLoopback(url)))
+  && url.pathname === '/' && url.search === '' && url.hash === '' && url.username === '' && url.password === '');
+const redirectUriSchema = urlSchema.refine((url) =>
+  (url.protocol === 'https:' || (url.protocol === 'http:' && isLoopback(url))) && url.hash === '');
+const httpEnvironmentSchema = z.object({
+  MCP_PUBLIC_URL: publicUrlSchema,
+  MCP_OWNER_SECRET: z.string().min(16),
+  MCP_HTTP_HOST: z.string().min(1).optional(),
+  PORT: z.string().regex(/^\d{1,5}$/).transform(Number).refine((port) => port >= 1 && port <= 65_535).optional(),
+  MCP_OAUTH_REDIRECT_URIS: z.string().optional(),
+});
+
+/** OAuth redirect URIs accepted by default: Claude and ChatGPT connectors. Loopback URIs (local clients) are always accepted. */
+export const defaultRedirectUris = [
+  'https://claude.ai/api/mcp/auth_callback',
+  'https://claude.com/api/mcp/auth_callback',
+  'https://chatgpt.com/connector_platform_oauth_redirect',
+  'https://platform.openai.com/apps-manage/oauth',
+];
+
+export type HttpConfiguration = ReturnType<typeof readHttpConfiguration>;
+
+/** The transport: stdio (default) or HTTP. */
+export function readTransport(environment: Record<string, string | undefined>) {
+  const transport = environment.MCP_TRANSPORT ?? 'stdio';
+  if (transport !== 'stdio' && transport !== 'http') throw new AimHarderError('INVALID_HTTP_CONFIGURATION');
+  return transport;
+}
+
+/** Settings of the remote HTTP transport: public origin, owner secret, listening address and extra OAuth redirect URIs. */
+export function readHttpConfiguration(environment: Record<string, string | undefined>) {
+  const parsed = httpEnvironmentSchema.safeParse(environment);
+  if (!parsed.success) throw new AimHarderError('INVALID_HTTP_CONFIGURATION');
+  const extra = (parsed.data.MCP_OAUTH_REDIRECT_URIS ?? '').split(',').map((value) => value.trim()).filter(Boolean);
+  const redirects = z.array(redirectUriSchema).safeParse(extra);
+  if (!redirects.success) throw new AimHarderError('INVALID_HTTP_CONFIGURATION');
+  return {
+    publicUrl: parsed.data.MCP_PUBLIC_URL,
+    mcpUrl: new URL('/mcp', parsed.data.MCP_PUBLIC_URL),
+    ownerSecret: parsed.data.MCP_OWNER_SECRET,
+    host: parsed.data.MCP_HTTP_HOST ?? '127.0.0.1',
+    port: parsed.data.PORT ?? 3000,
+    redirectUris: [...defaultRedirectUris, ...redirects.data.map((url) => url.href)],
+  };
+}
+
+/** Whether OAuth may redirect to this URI: an allowed exact URI, or any loopback http(s) URI (RFC 8252). */
+export function isAllowedRedirectUri(value: string, allowed: readonly string[]) {
+  if (!URL.canParse(value)) return false;
+  const url = new URL(value);
+  if (url.hash !== '') return false;
+  if (isLoopback(url)) return url.protocol === 'http:' || url.protocol === 'https:';
+  return url.protocol === 'https:' && allowed.includes(url.href);
+}
