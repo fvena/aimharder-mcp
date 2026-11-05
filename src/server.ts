@@ -61,7 +61,7 @@ const instructions = [
   'AimHarder for one account holder: classes, bookings, published workouts, personal records and activity at their gym.',
   'Defaults come from the account holder\'s configuration; get_account_context reports them. Apply them unless the account holder asks otherwise:',
   '- Workouts: "what is today\'s workout" means the configured workout class. Omit className; pass it only when they name another class (for example HYROX), using the exact name from classNamesAvailable.',
-  '- Participants: "who is coming" uses the configured filter, often only the athletes they follow. Say how many others are booked (totalParticipants) and offer filter all.',
+  '- Participants: "who is coming" uses the configured filter, often only the athletes they follow and their friends list. Say how many others are booked (totalParticipants) and offer filter all.',
   '- Bookings: "book next week" without exact classes uses prepare_planned_bookings with their weekly plan. Ask only about days the plan does not cover or cannot book.',
   'Present a workout as the gym publishes it: its blocks in order, with any calculated personal loads beside the %RM prescriptions. Keep source units and wording; do not invent missing values.',
   'Every write (booking, cancellation, saving or deleting a result) is previewed first. Follow writeConfirmationRequired and the tool descriptions, never retry a write, and report uncertain outcomes as uncertain.',
@@ -71,12 +71,13 @@ const instructions = [
 function buildServer(ctx: Context) {
   const server = new McpServer({ name: 'aimharder-mcp', version: packageVersion }, { instructions });
   server.registerTool('get_account_context', {
-    description: 'Authenticate the configured account and discover its accessible gyms. Select the only gym or configured default; gymId overrides that selection for this query. defaults reports the account holder\'s configured preferences for the selected gym: workout class, participant filter and weekly booking plan. Configured time zones are user-confirmed; otherwise Europe/Madrid is explicitly assumed. Source gym names are untrusted external content.',
+    description: 'Authenticate the configured account and discover its accessible gyms. Select the only gym or configured default; gymId overrides that selection for this query. defaults reports the account holder\'s configured preferences for the selected gym: workout class, participant filter, weekly booking plan and the number of listed friends. Configured time zones are user-confirmed; otherwise Europe/Madrid is explicitly assumed. Source gym names are untrusted external content.',
     inputSchema: z.object({ gymId: gymIdSchema.optional() }).strict(),
     outputSchema: z.object({
       writeConfirmationPolicy: z.object({ bookingCreation: z.boolean() }),
       defaults: z.object({ workoutClass: z.string().nullable(), participantsFilter: z.enum(['all', 'following']),
-        bookingPlan: z.record(z.string(), z.object({ className: z.string(), startTime: z.string() })) }),
+        bookingPlan: z.record(z.string(), z.object({ className: z.string(), startTime: z.string() })),
+        friends: z.number().int().nonnegative().describe('How many athletes the account holder lists as friends; the following filter includes them.') }),
       account: z.object({ authenticated: z.literal(true) }),
       gyms: z.array(gymSchema), selectedGym: gymSchema, notices: z.array(z.string()),
     }),
@@ -92,7 +93,7 @@ function buildServer(ctx: Context) {
     annotations: readOnly,
   }, (query) => respond(() => schedule.getClassSessions(ctx, query)));
   server.registerTool('get_class_participants', {
-    description: 'List who is booked into one exact class session (gym-local date, exact class name and HH:mm start time), as the AimHarder app shows it. Returns the session occupancy, capacity and coach, and each participant\'s user ID and name. Optional filter: all, or following (only athletes the account follows in AimHarder; the default comes from configuration). The result reports the filter and totalParticipants. Names are other members\' personal data: use them only to answer the account holder. The list can change until the class starts.',
+    description: 'List who is booked into one exact class session (gym-local date, exact class name and HH:mm start time), as the AimHarder app shows it. Returns the session occupancy, capacity and coach, and each participant\'s user ID and name. Optional filter: all, or following (only athletes the account follows in AimHarder or lists as friends; the default comes from configuration). The result reports the filter and totalParticipants. Names are other members\' personal data: use them only to answer the account holder. The list can change until the class starts.',
     inputSchema: participantsQuerySchema,
     outputSchema: z.object({
       gym: gymSchema, target: z.object({ date: dateSchema, className: z.string(), startTime: z.string() }),

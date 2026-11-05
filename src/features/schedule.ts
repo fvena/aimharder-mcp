@@ -64,13 +64,14 @@ export function getClassParticipants(ctx: Context, input: ParticipantsQuery) {
     const classSession = sessions[0]!;
     const all = parseParticipants(await session.read({ kind: 'participants', boxId, date: query.date, sessionId: classSession.sourceId }));
     const filter = query.filter ?? ctx.config.participantsFilter ?? 'all';
+    const friends = new Set(Object.keys(ctx.config.friends ?? {}).map(Number));
     const followed = filter === 'following' && all.length ? await followedAthletes(session) : new Set<number>();
-    const participants = filter === 'following' ? all.filter(participant => followed.has(participant.userId)) : all;
+    const participants = filter === 'following' ? all.filter(participant => followed.has(participant.userId) || friends.has(participant.userId)) : all;
     return { ...base, status: 'available' as const, filter, totalParticipants: all.length,
       session: { sessionId: classSession.sessionId, timeLabel: classSession.timeLabel, occupancy: classSession.occupancy, capacity: classSession.capacity, coach: classSession.coach },
       participants, notices: [
         'Participants come from the AimHarder app API for this exact session. The list can change until the class starts; sourceState is a raw value whose meaning is unverified.',
-        ...(filter === 'following' ? [`Filtered to athletes the account follows in AimHarder: ${participants.length} of ${all.length} participants. Follow or unfollow athletes in the AimHarder app to change this list.`] : []),
+        ...(filter === 'following' ? [`Filtered to athletes the account follows in AimHarder or lists as friends: ${participants.length} of ${all.length} participants. Follow athletes in the AimHarder app, or add athletes with a private profile to the friends list, to change this list.`] : []),
         privacy,
       ] };
   });

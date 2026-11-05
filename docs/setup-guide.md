@@ -143,6 +143,7 @@ Add any of these lines if you want them. Replace `undergroundrv` with your gym I
 | `AIMHARDER_WORKOUT_CLASS={"undergroundrv":"CROSS"}` | The class whose workout you mean when you ask "what's today's workout?". Use the exact name shown in AimHarder. |
 | `AIMHARDER_BOOKING_PLAN={"undergroundrv":{"mon":{"className":"CROSS","startTime":"14:00"},"sat":{"className":"CROSS","startTime":"09:30"}}}` | The class you usually book each weekday, so "book next week" just works. Days are `mon` `tue` `wed` `thu` `fri` `sat` `sun`. Times have two digits for the hour: `09:30`, not `9:30`. |
 | `AIMHARDER_PARTICIPANTS_FILTER=following` | When you ask who's in a class, show only the athletes you follow in AimHarder. The default, `all`, shows everyone. |
+| `AIMHARDER_FRIENDS={"123456":"Laura"}` | Friends with a private profile, whom you can't follow in AimHarder, also count as "following". Ask the assistant who's in a class you share with them and for their user ID. |
 | `AIMHARDER_REQUIRE_BOOKING_CONFIRMATION=false` | Book without a confirmation step when you name an exact class. Cancelling and saving results always ask. The default, `true`, always asks. |
 
 [Configuration](configuration.md) explains every setting in detail.

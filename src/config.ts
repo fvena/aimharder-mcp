@@ -18,6 +18,10 @@ const plannedClassSchema = z.object({ className, startTime: z.string().regex(/^(
 export type PlannedClass = z.infer<typeof plannedClassSchema>;
 const bookingPlansSchema = z.record(gymIdSchema, z.partialRecord(z.enum(weekdays), plannedClassSchema));
 export type BookingPlan = Partial<Record<Weekday, PlannedClass>>;
+/** Friends: AimHarder user IDs (as strings) to a label chosen by the account holder. */
+export const friendsSchema = z.record(z.string().regex(/^[1-9]\d{0,15}$/), z.string().trim().min(1).max(100))
+  .refine((friends) => Object.keys(friends).length <= 200);
+export type Friends = Record<string, string>;
 
 /** Parse an optional JSON environment value with a schema, or fail with one public error code. */
 function jsonSetting<T>(value: string | undefined, schema: z.ZodType<T>, fallback: T, code: ConstructorParameters<typeof AimHarderError>[0]): T {
@@ -36,8 +40,9 @@ const environmentSchema = z.object({
   AIMHARDER_PARTICIPANTS_FILTER: z.string().optional(),
   AIMHARDER_WORKOUT_CLASS: z.string().optional(),
   AIMHARDER_BOOKING_PLAN: z.string().optional(),
+  AIMHARDER_FRIENDS: z.string().optional(),
 });
-export type Configuration = Omit<ReturnType<typeof readConfiguration>, 'requireBookingConfirmation' | 'bookingWindowDays' | 'cancellationWindowMinutes' | 'participantsFilter' | 'workoutClasses' | 'bookingPlans'> & { workoutClasses?: Record<string, string>; bookingPlans?: Record<string, BookingPlan>; requireBookingConfirmation?: boolean; bookingWindowDays?: Record<string, number>; cancellationWindowMinutes?: Record<string, number>; participantsFilter?: 'all' | 'following' };
+export type Configuration = Omit<ReturnType<typeof readConfiguration>, 'requireBookingConfirmation' | 'bookingWindowDays' | 'cancellationWindowMinutes' | 'participantsFilter' | 'workoutClasses' | 'bookingPlans' | 'friends'> & { friends?: Friends; workoutClasses?: Record<string, string>; bookingPlans?: Record<string, BookingPlan>; requireBookingConfirmation?: boolean; bookingWindowDays?: Record<string, number>; cancellationWindowMinutes?: Record<string, number>; participantsFilter?: 'all' | 'following' };
 
 export function readConfiguration(environment: Record<string, string | undefined>) {
   const parsed = environmentSchema.safeParse(environment);
@@ -70,6 +75,7 @@ export function readConfiguration(environment: Record<string, string | undefined
     participantsFilter: filter,
     workoutClasses: jsonSetting(parsed.data.AIMHARDER_WORKOUT_CLASS, workoutClassesSchema, {}, 'INVALID_WORKOUT_CLASS_CONFIGURATION'),
     bookingPlans: jsonSetting(parsed.data.AIMHARDER_BOOKING_PLAN, bookingPlansSchema, {}, 'INVALID_BOOKING_PLAN_CONFIGURATION') as Record<string, BookingPlan>,
+    friends: jsonSetting(parsed.data.AIMHARDER_FRIENDS, friendsSchema, {}, 'INVALID_FRIENDS_CONFIGURATION') as Friends,
     requireBookingConfirmation: parsed.data.AIMHARDER_REQUIRE_BOOKING_CONFIRMATION !== 'false',
     username: parsed.data.AIMHARDER_USERNAME,
     password: parsed.data.AIMHARDER_PASSWORD,

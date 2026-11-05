@@ -26,6 +26,7 @@ const messages = {
   INVALID_CANCELLATION_WINDOW_CONFIGURATION: 'AIMHARDER_CANCELLATION_WINDOW_MINUTES must be a JSON object mapping gym IDs to whole minutes from 1 to 10080.',
   INVALID_WORKOUT_CLASS_CONFIGURATION: 'AIMHARDER_WORKOUT_CLASS must be a JSON object mapping gym IDs to an exact workout class name, such as {"my-gym":"CROSS"}.',
   INVALID_BOOKING_PLAN_CONFIGURATION: 'AIMHARDER_BOOKING_PLAN must be a JSON object mapping gym IDs to weekdays (mon–sun), each with an exact className and HH:mm startTime.',
+  INVALID_FRIENDS_CONFIGURATION: 'AIMHARDER_FRIENDS must be a JSON object mapping AimHarder user IDs to a label, such as {"123456":"Laura"}, with at most 200 entries.',
   INVALID_PLANNED_BOOKING_QUERY: 'Supply valid inclusive gym-local dates spanning at most 14 calendar dates, with an optional accessible gym ID.',
   INVALID_BOOKING_WINDOW_CONFIGURATION: 'AIMHARDER_BOOKING_WINDOW_DAYS must be a JSON object mapping gym IDs to whole days from 1 to 60.',
   GYM_TIME_ZONE_REQUIRED: 'A valid IANA zone could not be established for the selected gym. Check AIMHARDER_GYM_TIME_ZONES and restart. No date query was made.',

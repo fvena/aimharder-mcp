@@ -8,7 +8,7 @@ export interface AccountContext {
   selectedGym: Gym;
   notices: string[];
   writeConfirmationPolicy: { bookingCreation: boolean };
-  defaults: { workoutClass: string | null; participantsFilter: 'all' | 'following'; bookingPlan: BookingPlan };
+  defaults: { workoutClass: string | null; participantsFilter: 'all' | 'following'; bookingPlan: BookingPlan; friends: number };
 }
 
 export function getAccountContext(ctx: Context, gymId?: string): Promise<AccountContext> {
@@ -18,6 +18,7 @@ export function getAccountContext(ctx: Context, gymId?: string): Promise<Account
       workoutClass: ctx.config.workoutClasses && Object.hasOwn(ctx.config.workoutClasses, selectedGym.id) ? ctx.config.workoutClasses[selectedGym.id]! : null,
       participantsFilter: ctx.config.participantsFilter ?? 'all',
       bookingPlan: ctx.config.bookingPlans && Object.hasOwn(ctx.config.bookingPlans, selectedGym.id) ? ctx.config.bookingPlans[selectedGym.id]! : {},
+      friends: Object.keys(ctx.config.friends ?? {}).length,
     },
     account: { authenticated: true }, gyms: gyms.map((entry) => entry.gym), selectedGym,
     notices: gyms.some(({ gym }) => gym.timeZoneStatus === 'assumed')
