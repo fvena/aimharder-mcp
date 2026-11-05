@@ -67,9 +67,6 @@ function isFatalPersonalRead(error: unknown) {
   ].includes(error.code);
 }
 
-export interface BookingCreationDispatch { identity: number; boxId: number; sourceId: number; preview: BookingCreationPreview; outcome?: {denied:boolean;writeIssue:boolean}; }
-export interface BookingCancellationDispatch { identity: number; boxId: number; sourceId: number; reservationId: number; preview: BookingCancellationPreview; late: boolean; outcome?: {cancelState:number|null;writeIssue:boolean}; }
-export interface ActionExecutionCoordination<F = BookingCreationDispatch> { beforeDispatch(facts: F): Promise<void>; afterDispatch?(facts: F): Promise<void>; }
 
 /** One account, an in-memory session, and a closed set of upstream operations. */
 const dayWorkoutsNotice = 'Workouts come from the app\'s day-workout list for each requested date. An unavailable day can still be unpublished, a rest day or a holiday; workouts published later will appear on a later query.';
@@ -99,35 +96,11 @@ export class AimHarderClient {
   #exerciseResultPreparations = new PreparationStore<ExerciseResultPreview>();
   #exerciseResultDeletions = new PreparationStore<ExerciseResultDeletionPreview>();
 
-  constructor(private readonly configuration: Configuration, private expectedAccountId?: number) {}
+  constructor(private readonly configuration: Configuration) {}
 
   #requireWriteConfirmation(marker: true | undefined, required = true) {
     if (required && marker !== true)
       throw new AimHarderError('WRITE_CONFIRMATION_REQUIRED');
-  }
-
-  /** Trusted connection setup: identity stays inside the service, outside MCP results. */
-  verifyConnection(): Promise<{ identity: number; gyms: Gym[] }> {
-    const result = this.#queue.then(async () => {
-      if (this.#authenticationFailure) throw this.#authenticationFailure;
-      if (this.#accountId === undefined) await this.#authenticate();
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const gyms = (await this.#discoverGyms()).map(entry => entry.gym);
-          this.expectedAccountId ??= this.#accountId;
-          return { identity: this.#accountId!, gyms };
-        }
-        catch (error) {
-          if (!(error instanceof SessionExpired)) throw error;
-          this.#clearSession();
-          if (attempt === 1) throw new AimHarderError('SESSION_EXPIRED');
-          await this.#authenticate();
-        }
-      }
-      throw new AimHarderError('SESSION_EXPIRED');
-    });
-    this.#queue = result.then(() => undefined, () => undefined);
-    return result;
   }
 
   getAccountContext(gymId?: string): Promise<AccountContext> {
@@ -258,7 +231,7 @@ export class AimHarderClient {
     }).then(result => ({ ...result, writeConfirmationRequired: this.configuration.requireBookingConfirmation !== false }));
   }
 
-  executeBookingCreation(input: BookingExecution, coordination?: ActionExecutionCoordination) {
+  executeBookingCreation(input: BookingExecution) {
     const parsed = bookingExecutionSchema.safeParse(input);
     if (!parsed.success) return Promise.reject(new AimHarderError('INVALID_BOOKING_EXECUTION_QUERY'));
     try { this.#requireWriteConfirmation(parsed.data.confirmed, this.configuration.requireBookingConfirmation !== false); }
@@ -286,42 +259,19 @@ export class AimHarderClient {
         return { ...base, status: 'stale' as const, observedState: 'unknown' as const,
           notices: ['A current upcoming entry may already cover this class. No booking request was sent.'] };
       }
+      // At most one write; its outcome is decided by fresh reads, never by resending.
       let response: unknown;
       let writeIssue = false;
-      let dispatchAuthorized = coordination === undefined;
       try {
-        response = await this.#request({ kind: 'book-create', gymId: gym.id, sourceId: entry.sourceId, date: target.date }, coordination ? async () => {
-          await coordination.beforeDispatch({identity:this.#accountId!,boxId,sourceId:entry.sourceId,preview:structuredClone(preview)});
-          dispatchAuthorized = true;
-        } : undefined);
+        response = await this.#request({ kind: 'book-create', gymId: gym.id, sourceId: entry.sourceId, date: target.date });
         if (!z.record(z.string(), z.unknown()).safeParse(response).success) writeIssue = true;
-      } catch (error) {
-        // A trusted denial happens before fetch and must remain a zero-send error.
-        if (!dispatchAuthorized) throw error;
-        writeIssue = true;
-      }
-      const facts:BookingCreationDispatch={identity:this.#accountId!,boxId,sourceId:entry.sourceId,preview,outcome:{denied:bookingResponseDenied(response),writeIssue}};
-      let recoveryIssue = false;
-      try{await coordination?.afterDispatch?.(facts);}
-      catch{recoveryIssue = true;}
-      // Post-send persistence cannot substitute for the original account's reads.
-      const result = await this.#reconcileBookingCreation(facts,response,writeIssue,recover);
-      return recoveryIssue ? { ...result, notices: [...result.notices,
-        'Recovery details could not be saved. If this response is lost, inspect the original booking before preparing another action; no write was retried.',
-      ] } : result;
+      } catch { writeIssue = true; }
+      return this.#reconcileBookingCreation({ preview, boxId, sourceId: entry.sourceId }, response, writeIssue, recover);
     });
   }
 
-  /** Trusted read-only recovery of an original dispatch; never reconstructs permission. */
-  reconcileBookingCreation(facts: BookingCreationDispatch) {
-    return this.#query(facts.preview.gym.id, async (_gyms,{gym,boxId},recover)=>{
-      if(this.#accountId!==facts.identity || boxId!==facts.boxId || gym.timeZone!==facts.preview.gym.timeZone || gym.timeZoneStatus!=='user-confirmed' || gym.name!==facts.preview.gym.name) throw new AimHarderError('IDENTITY_MISMATCH');
-      return this.#reconcileBookingCreation(facts,undefined,facts.outcome?.writeIssue??true,recover,true);
-    });
-  }
-
-  async #reconcileBookingCreation(facts: BookingCreationDispatch,response:unknown,writeIssue:boolean,recover:()=>Promise<void>,recovered=false) {
-    const {preview,boxId,sourceId}=facts;const {gym,target}=preview;
+  async #reconcileBookingCreation(dispatch: { preview: BookingCreationPreview; boxId: number; sourceId: number }, response: unknown, writeIssue: boolean, recover: () => Promise<void>) {
+    const { preview, boxId, sourceId } = dispatch;const {gym,target}=preview;
     const base={action:'create' as const,gym,target};
     const matchesTarget=(item:{date:string|null;startTime:string|null;timeLabel:string;classType:{name:string|null}})=>item.date===target.date&&item.startTime===target.startTime&&item.timeLabel.endsWith(target.endTime)&&(item.classType.name===target.className||item.classType.name===null);
       let scheduleState: 'unbooked' | 'booked' | 'waitlisted' | 'unknown' = 'unknown';
@@ -343,17 +293,17 @@ export class AimHarderClient {
         // This view has no verified horizon; absence cannot contradict a fresh daily schedule.
         conflicting = matches.length > 1 || matches.some(item => item.state !== scheduleState);
       } catch { reconciliationIssue = true; }
-      const denied = facts.outcome?.denied ?? bookingResponseDenied(response);
+      const denied = bookingResponseDenied(response);
       const status = conflicting || reconciliationIssue || (denied && scheduleState !== 'unbooked') ? 'uncertain' as const : scheduleState === 'booked' ? 'confirmed' as const
         : scheduleState === 'waitlisted' ? 'waitlisted' as const
           : scheduleState === 'unbooked' && denied ? 'rejected' as const : 'uncertain' as const;
       return { ...base, status, observedState: scheduleState, notices: [
-        recovered ? 'An earlier booking operation may have been sent. Only fresh original-account reads were requested; no write was replayed.' : 'One standard booking request was attempted. Fresh booking reads, not the HTTP response alone, determine the reported state.',
+        'One standard booking request was attempted. Fresh booking reads, not the HTTP response alone, determine the reported state.',
         status === 'confirmed' ? 'A fresh schedule read reported a confirmed booking.'
           : status === 'waitlisted' ? 'A fresh schedule read reported a waitlist state; no further write was sent.'
             : status === 'rejected' ? 'The source returned a denial indication and the fresh schedule remains unbooked. Denial semantics remain unverified live.'
               : 'The outcome is uncertain. Check the booking directly before preparing a new action; no automatic write retry was sent.',
-        ...(writeIssue ? [recovered ? 'The original write response is unavailable; use fresh booking reads to assess the outcome.' : 'The write response was incomplete; use fresh booking reads to assess the outcome.'] : []),
+        ...(writeIssue ? ['The write response was incomplete; use fresh booking reads to assess the outcome.'] : []),
         ...(reconciliationIssue ? ['A follow-up view could not be read completely; booking state remains uncertain.'] : []),
       ] };
   }
@@ -398,23 +348,23 @@ export class AimHarderClient {
     }).then(result => ({ ...result, writeConfirmationRequired: true }));
   }
 
-  executeBookingCancellation(input: BookingExecution, coordination?: ActionExecutionCoordination<BookingCancellationDispatch>) {
+  executeBookingCancellation(input: BookingExecution) {
     const parsed = bookingExecutionSchema.safeParse(input);
     if (!parsed.success) return Promise.reject(new AimHarderError('INVALID_BOOKING_EXECUTION_QUERY'));
     try { this.#requireWriteConfirmation(parsed.data.confirmed); }
     catch (error) { return Promise.reject(error); }
-    return this.#executeCancellation(parsed.data, false, coordination);
+    return this.#executeCancellation(parsed.data, false);
   }
 
-  executeLateBookingCancellation(input: LateCancellationExecution, coordination?: ActionExecutionCoordination<BookingCancellationDispatch>) {
+  executeLateBookingCancellation(input: LateCancellationExecution) {
     const parsed = lateCancellationExecutionSchema.safeParse(input);
     if (!parsed.success) return Promise.reject(new AimHarderError('INVALID_LATE_CANCELLATION_QUERY'));
     try { this.#requireWriteConfirmation(parsed.data.confirmedCreditLoss); }
     catch (error) { return Promise.reject(error); }
-    return this.#executeCancellation(parsed.data, true, coordination);
+    return this.#executeCancellation(parsed.data, true);
   }
 
-  #executeCancellation(query: { gymId?: string | undefined; actionReference: string }, late: boolean, coordination?: ActionExecutionCoordination<BookingCancellationDispatch>) {
+  #executeCancellation(query: { gymId?: string | undefined; actionReference: string }, late: boolean) {
     return this.#query(query.gymId, async (_gyms, { gym, boxId }, recover) => {
       const entry = late
         ? this.#bookingPreparations.take(query.actionReference, 'cancel-late', this.#accountId!, gym.id)
@@ -438,35 +388,20 @@ export class AimHarderClient {
         return { ...base, status: 'stale' as const, observedState: 'booked' as const,
           notices: ['The configured cancellation window was reached after preparation. Prepare a new preview and confirm the possible credit loss before a cancellation request.'] };
       }
+      // At most one write; its outcome is decided by fresh reads, never by resending.
       let response: unknown;
       let writeIssue = false;
-      const facts: BookingCancellationDispatch = {identity:this.#accountId!,boxId,sourceId:before[0]!.sourceId,reservationId:entry.reservationId,preview,late};
-      let dispatchAuthorized = coordination === undefined;
-      try { response = await this.#request({ kind: 'book-cancel', gymId: gym.id, reservationId: entry.reservationId, late }, coordination ? async () => {
-        await coordination.beforeDispatch(structuredClone(facts)); dispatchAuthorized = true;
-      } : undefined); }
-      catch(error) { if(!dispatchAuthorized) throw error; writeIssue = true; }
+      try { response = await this.#request({ kind: 'book-cancel', gymId: gym.id, reservationId: entry.reservationId, late }); }
+      catch { writeIssue = true; }
       const parsedResponse = z.object({ cancelState: z.number().int() }).safeParse(response);
-      facts.outcome = {cancelState:parsedResponse.success?parsedResponse.data.cancelState:null,writeIssue};
-      let recoveryIssue = false;
-      try{await coordination?.afterDispatch?.(facts);}catch{recoveryIssue=true;}
-      const result = await this.#reconcileBookingCancellation(facts,recover);
-      return recoveryIssue ? {...result,notices:[...result.notices,'Recovery details could not be saved. If this response is lost, inspect the original reservation before preparing another action; no write was retried.']} : result;
+      return this.#reconcileBookingCancellation({ preview, boxId, sourceId: before[0]!.sourceId, reservationId: entry.reservationId, late,
+        cancelState: parsedResponse.success ? parsedResponse.data.cancelState : null, writeIssue }, recover);
     });
   }
 
-  /** Trusted read-only recovery; a recovered warning never restores execution permission. */
-  reconcileBookingCancellation(facts: BookingCancellationDispatch) {
-    return this.#query(facts.preview.gym.id,async(_gyms,{gym,boxId},recover)=>{
-      if(this.#accountId!==facts.identity||boxId!==facts.boxId||gym.timeZone!==facts.preview.gym.timeZone||gym.timeZoneStatus!=='user-confirmed'||gym.name!==facts.preview.gym.name)throw new AimHarderError('IDENTITY_MISMATCH');
-      return this.#reconcileBookingCancellation(facts,recover,true);
-    });
-  }
-
-  async #reconcileBookingCancellation(facts: BookingCancellationDispatch,recover:()=>Promise<void>,recovered=false) {
-      const {preview,boxId,sourceId,reservationId,late}=facts; const {gym,target}=preview;
+  async #reconcileBookingCancellation(dispatch: { preview: BookingCancellationPreview; boxId: number; sourceId: number; reservationId: number; late: boolean; cancelState: number | null; writeIssue: boolean }, recover: () => Promise<void>) {
+      const { preview, boxId, sourceId, reservationId, late, writeIssue } = dispatch; const { gym, target } = preview;
       const base={action:'cancel' as const,gym,target,credit:preview.credit,writeConfirmationRequired:true};
-      const writeIssue=facts.outcome?.writeIssue??true;
       let observedState: 'booked' | 'waitlisted' | 'cancelled' | 'unbooked' | 'unknown' = 'unknown';
       let conflicting = false;
       let reconciliationIssue = false;
@@ -493,15 +428,15 @@ export class AimHarderClient {
           && item.timeLabel.endsWith(target.endTime) && (item.classType.name === target.className || item.classType.name === null));
         conflicting = conflicting || matches.length > 1 || matches.some(item => item.state !== observedState);
       } catch { reconciliationIssue = true; }
-      const result = facts.outcome?.cancelState ?? null;
+      const result = dispatch.cancelState;
       const status = conflicting || reconciliationIssue || writeIssue ? 'uncertain' as const
         : result === 1 && (observedState === 'cancelled' || releasedSameSession) ? 'confirmed' as const
           : !late && result === 2 && observedState === 'booked' && sameActionableReservation ? 'pending-credit-loss' as const
             : result === 3 && observedState === 'booked' ? 'rejected' as const : 'uncertain' as const;
-      const lateReference = status === 'pending-credit-loss' && !recovered
+      const lateReference = status === 'pending-credit-loss'
         ? this.#bookingPreparations.issueLateCancellation(this.#accountId!, boxId, reservationId, preview) : {};
       return { ...base, status, observedState, notices: [
-        recovered ? 'An earlier cancellation may have been sent. Only fresh original-account reads were requested; no write was replayed and no executable late reference was restored.' : `One ${late ? 'late' : 'standard'} cancellation request was attempted. Fresh booking reads, not the HTTP response alone, determine the reported state.`,
+        `One ${late ? 'late' : 'standard'} cancellation request was attempted. Fresh booking reads, not the HTTP response alone, determine the reported state.`,
         status === 'confirmed' ? 'Fresh schedule and upcoming reads support no active booking for the target. No credit balance or refund was verified.'
           : status === 'pending-credit-loss' ? 'AimHarder indicated possible late credit loss. The reservation remains booked. No second cancellation request was sent. Show the exact class, current state, and possible loss. Obtain separate explicit confirmation before a late attempt when writeConfirmationRequired is true. No late request is automatic.'
             : status === 'rejected' ? 'AimHarder indicated a denial and the reservation remains booked.'
@@ -964,7 +899,7 @@ export class AimHarderClient {
     if (!parsed.success) throw new AimHarderError('INVALID_RESPONSE');
     const account = parsed.data.data[0];
     if (!account) throw new SessionExpired();
-    if (account.id !== this.#accountId || (this.expectedAccountId !== undefined && account.id !== this.expectedAccountId)) {
+    if (account.id !== this.#accountId) {
       this.#clearSession();
       throw new AimHarderError('IDENTITY_MISMATCH');
     }
@@ -985,7 +920,7 @@ export class AimHarderClient {
     return [...gyms.values()];
   }
 
-  async #request(operation: { kind: 'activity-calendar'; month: string } | { kind: 'activity-detail'; sourceId: number } | 'login' | 'identity' | { kind: 'classes'; gymId: string; boxId: number; date: string } | { kind: 'book-create'; gymId: string; sourceId: number; date: string } | { kind: 'book-cancel'; gymId: string; reservationId: number; late: boolean } | { kind: 'upcoming'; gymId: string; boxId: number } | { kind: 'gym-page'; gymId: string } | { kind: 'workout'; gymId: string; sourceId: number } | { kind: 'exercise-detail'; gymId: string; exerciseId: number; accountId: number } | { kind: 'exercise-search'; gymId: string; name: string }, beforeDispatch?: () => Promise<void>): Promise<unknown> {
+  async #request(operation: { kind: 'activity-calendar'; month: string } | { kind: 'activity-detail'; sourceId: number } | 'login' | 'identity' | { kind: 'classes'; gymId: string; boxId: number; date: string } | { kind: 'book-create'; gymId: string; sourceId: number; date: string } | { kind: 'book-cancel'; gymId: string; reservationId: number; late: boolean } | { kind: 'upcoming'; gymId: string; boxId: number } | { kind: 'gym-page'; gymId: string } | { kind: 'workout'; gymId: string; sourceId: number } | { kind: 'exercise-detail'; gymId: string; exerciseId: number; accountId: number } | { kind: 'exercise-search'; gymId: string; name: string }): Promise<unknown> {
     // Booking flows use the mobile app API; see docs/aimharder-api.md.
     if (typeof operation === 'object' && operation.kind === 'workout') {
       return this.#appRequest('activity/workout', { query: { SEID: String(operation.sourceId) } });
@@ -998,7 +933,6 @@ export class AimHarderClient {
     }
     if (typeof operation === 'object' && ['classes', 'book-create', 'book-cancel', 'upcoming'].includes(operation.kind)) {
       const app = appBookingRequest(operation as AppBookingOperation);
-      if (beforeDispatch) await beforeDispatch();
       try { return await this.#appRequest(app.path, app.options); }
       catch (error) {
         // An expired write follows the web contract: callers reconcile it instead of replaying it.
@@ -1043,8 +977,6 @@ export class AimHarderClient {
       headers['Content-Type'] = 'application/x-www-form-urlencoded;charset=UTF-8';
       init.body = new URLSearchParams({ id: String(operation.reservationId), late: operation.late ? '1' : '0' }).toString();
     }
-    // Last trusted admission/fence point: cookies and body are ready; fetch follows.
-    if (beforeDispatch) await beforeDispatch();
     try {
       const response = await fetch(url, init);
       if (response.status === 401) {
