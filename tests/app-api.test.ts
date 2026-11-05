@@ -271,6 +271,22 @@ describe('filtering participants to followed athletes', () => {
     expect(JSON.stringify(result)).toContain('INVALID_FOLLOWING_RESPONSE');
   });
 
+  test('adds configured friends to followed athletes, even with a private profile', async () => {
+    upstream.use(http.get(`${app}/user/list`, () => HttpResponse.json({ type: 1, relId: '42', users: [] })));
+    const client = await connect({ AIMHARDER_FRIENDS: '{"77":"Partner with a private profile"}' });
+    const result = await client.callTool({ name: 'get_class_participants', arguments: { ...participantsArgs, filter: 'following' } });
+    expect((result.structuredContent as Filtered).participants.map(p => p.userId)).toEqual([77]);
+    const context = await client.callTool({ name: 'get_account_context', arguments: {} });
+    expect(context.structuredContent).toMatchObject({ defaults: { friends: 1 } });
+    expect(JSON.stringify(context)).not.toContain('Partner with a private profile');
+  });
+
+  test('rejects an invalid friends list', async () => {
+    for (const friends of ['["77"]', '{"0":"Zero"}', '{"77":""}', 'not json']) {
+      await expect(connect({ AIMHARDER_FRIENDS: friends })).rejects.toMatchObject({ code: 'INVALID_FRIENDS_CONFIGURATION' });
+    }
+  });
+
   test('rejects an invalid filter value and configuration', async () => {
     const result = await (await connect()).callTool({ name: 'get_class_participants', arguments: { ...participantsArgs, filter: 'friends' } });
     expect(result.isError).toBe(true);

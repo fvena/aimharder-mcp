@@ -26,6 +26,7 @@ const messages = {
   INVALID_CANCELLATION_WINDOW_CONFIGURATION: 'AIMHARDER_CANCELLATION_WINDOW_MINUTES must be a JSON object mapping gym IDs to whole minutes from 1 to 10080.',
   INVALID_WORKOUT_CLASS_CONFIGURATION: 'AIMHARDER_WORKOUT_CLASS must be a JSON object mapping gym IDs to an exact workout class name, such as {"my-gym":"CROSS"}.',
   INVALID_BOOKING_PLAN_CONFIGURATION: 'AIMHARDER_BOOKING_PLAN must be a JSON object mapping gym IDs to weekdays (mon–sun), each with an exact className and HH:mm startTime.',
+  INVALID_FRIENDS_CONFIGURATION: 'AIMHARDER_FRIENDS must be a JSON object mapping AimHarder user IDs to a label, such as {"123456":"Laura"}, with at most 200 entries.',
   INVALID_PLANNED_BOOKING_QUERY: 'Supply valid inclusive gym-local dates spanning at most 14 calendar dates, with an optional accessible gym ID.',
   INVALID_BOOKING_WINDOW_CONFIGURATION: 'AIMHARDER_BOOKING_WINDOW_DAYS must be a JSON object mapping gym IDs to whole days from 1 to 60.',
   GYM_TIME_ZONE_REQUIRED: 'A valid IANA zone could not be established for the selected gym. Check AIMHARDER_GYM_TIME_ZONES and restart. No date query was made.',
@@ -41,7 +42,7 @@ const messages = {
   REQUEST_FAILED: 'The AimHarder request failed or attempted a redirect. No further retry was attempted.',
   NO_ACCESSIBLE_GYMS: 'No accessible gym was established from the account response.',
   UNSUPPORTED_MEMBERSHIP: 'The account includes an unverified membership format. Gym discovery could not be completed.',
-  DEFAULT_GYM_REQUIRED: 'Multiple gyms are accessible. Set AIMHARDER_DEFAULT_GYM to one of their gym IDs and restart the server.',
+  DEFAULT_GYM_REQUIRED: 'Multiple gyms are accessible. Choose a default gym on the settings page, or set AIMHARDER_DEFAULT_GYM to one of their gym IDs and restart the server.',
   GYM_NOT_ACCESSIBLE: 'The requested or configured gym is not in the verified accessible gym list.',
 } as const;
 

@@ -7,7 +7,7 @@ export const participantsFilterSchema = z.enum(['all', 'following']);
 export type ParticipantsFilter = z.infer<typeof participantsFilterSchema>;
 export const participantsQuerySchema = z.object({
   date: dateSchema, className: z.string().trim().min(1).max(300), startTime: timeSchema, gymId: gymIdSchema.optional(),
-  filter: participantsFilterSchema.optional().describe('all: every participant; following: only athletes the account follows in AimHarder. Defaults to AIMHARDER_PARTICIPANTS_FILTER, else all.'),
+  filter: participantsFilterSchema.optional().describe('all: every participant; following: only athletes the account follows in AimHarder or lists as friends. Defaults to AIMHARDER_PARTICIPANTS_FILTER, else all.'),
 }).strict();
 export type ParticipantsQuery = z.infer<typeof participantsQuerySchema>;
 

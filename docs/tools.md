@@ -8,7 +8,7 @@ Content from AimHarder (class names, workout notes, participant names) is untrus
 
 ### `get_account_context`
 
-Signs in and lists `gyms` (each with `id`, `name`, `timeZone`, `timeZoneStatus`), the `selectedGym` and `writeConfirmationPolicy.bookingCreation`. `defaults` reports your configured preferences for the selected gym: `workoutClass`, `participantsFilter` and `bookingPlan`.
+Signs in and lists `gyms` (each with `id`, `name`, `timeZone`, `timeZoneStatus`), the `selectedGym` and `writeConfirmationPolicy.bookingCreation`. `defaults` reports your configured preferences for the selected gym: `workoutClass`, `participantsFilter`, `bookingPlan` and `friends` (how many athletes `AIMHARDER_FRIENDS` lists). On the remote server, `settingsUrl` is the page where the account holder changes these preferences.
 
 The server also sends MCP `instructions` that tell the assistant to apply these defaults: today's workout means the configured class, "who is coming" uses the configured participant filter, and "book next week" uses the weekly plan.
 
@@ -18,7 +18,7 @@ Input: `startDate`, `endDate` (inclusive), optional exact `className` and `start
 
 ### `get_class_participants`
 
-Input: `date`, exact `className`, `startTime` and an optional `filter`: `all`, or `following` for only the athletes you follow in AimHarder. Without `filter`, `AIMHARDER_PARTICIPANTS_FILTER` decides (default `all`). Status `available` returns the session (`occupancy`, `capacity`, `coach`), the applied `filter`, `totalParticipants` and `participants` (`userId`, `name`, raw `sourceState`); `missing` and `ambiguous` return none. The followed list comes from your AimHarder account, so you mark friends by following them in the app; gym accounts you follow are ignored. Names are other members' personal data: use them only to answer the account holder.
+Input: `date`, exact `className`, `startTime` and an optional `filter`: `all`, or `following` for only the athletes you follow in AimHarder plus `AIMHARDER_FRIENDS`. Without `filter`, `AIMHARDER_PARTICIPANTS_FILTER` decides (default `all`). Status `available` returns the session (`occupancy`, `capacity`, `coach`), the applied `filter`, `totalParticipants` and `participants` (`userId`, `name`, raw `sourceState`); `missing` and `ambiguous` return none. The followed list comes from your AimHarder account, so you mark friends by following them in the app, or, for a private profile, by adding their `userId` to `AIMHARDER_FRIENDS`; gym accounts you follow are ignored. Names are other members' personal data: use them only to answer the account holder.
 
 ## Bookings
 
