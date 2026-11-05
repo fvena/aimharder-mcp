@@ -1,6 +1,6 @@
 # Configuration
 
-The server runs locally over stdio for one AimHarder account. It reads its settings from the process environment; it does not load files by itself. Keep credentials in a private file (`chmod 600`) outside the repository and pass it with `node --env-file=…`, or let your MCP client inject the variables.
+The server serves one AimHarder account, locally over stdio (default) or remotely over HTTP with OAuth ([remote use](remote.md)). It reads its settings from the process environment; it does not load files by itself. Keep credentials in a private file (`chmod 600`) outside the repository and pass it with `node --env-file=…`, or let your MCP client inject the variables.
 
 ## Environment variables
 
@@ -14,7 +14,18 @@ The server runs locally over stdio for one AimHarder account. It reads its setti
 | `AIMHARDER_CANCELLATION_WINDOW_MINUTES` | no | JSON object from gym ID to minutes (1–10080). Cancelling within that many minutes of the class may lose a credit. Cancellation previews warn inside the window, and a preview prepared before the window opened becomes `stale`. |
 | `AIMHARDER_REQUIRE_BOOKING_CONFIRMATION` | no | `true` (default) or `false`. With `false`, an explicit request to book an exact class is enough to execute its preview. Cancellations and saving or deleting results always require confirmation. |
 
-Invalid values stop the server at startup with a specific error code (for example `INVALID_TIME_ZONE_CONFIGURATION`), before any request is sent.
+### Remote (HTTP) transport
+
+| Variable | Required | Description |
+| --- | --- | --- |
+| `MCP_TRANSPORT` | no | `stdio` (default) or `http`. |
+| `MCP_PUBLIC_URL` | with `http` | Public origin, without a path, for example `https://my-aimharder.fly.dev`. HTTPS is required except for `localhost`. The MCP endpoint is `<origin>/mcp`, and requests for other host names are rejected. |
+| `MCP_OWNER_SECRET` | with `http` | Secret, at least 16 characters, typed on the approval page to connect a client. It also derives the token signing key, so changing it disconnects every client. |
+| `MCP_HTTP_HOST` | no | Listening address. Default `127.0.0.1`; the Docker image uses `0.0.0.0`. |
+| `PORT` | no | Listening port, 1–65535. Default `3000`; the Docker image uses `8080`. |
+| `MCP_OAUTH_REDIRECT_URIS` | no | Extra OAuth redirect URIs, comma-separated (HTTPS, or HTTP on loopback). Claude's and ChatGPT's callbacks and loopback URIs are always accepted. |
+
+Invalid values stop the server at startup with a specific error code (for example `INVALID_TIME_ZONE_CONFIGURATION` or `INVALID_HTTP_CONFIGURATION`), before any request is sent.
 
 The booking and cancellation windows are the rules your gym states. They prevent premature or unexpected requests, but AimHarder still decides whether a booking or cancellation is accepted.
 
