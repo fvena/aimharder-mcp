@@ -4,7 +4,9 @@ import { gymIdSchema } from '../config.js';
 import { AimHarderError } from '../errors.js';
 import { personalLoadSchema } from './calculated-loads.js';
 
-export const workoutQuerySchema = z.object({ date: dateSchema, className: z.string().trim().min(1).max(300), gymId: gymIdSchema.optional() }).strict();
+const workoutClassName = z.string().trim().min(1).max(300).optional()
+  .describe('Exact feed wodClass, such as CROSS or HYROX. Omit it to use the class configured for the gym (AIMHARDER_WORKOUT_CLASS); pass it only when the account holder names a class.');
+export const workoutQuerySchema = z.object({ date: dateSchema, className: workoutClassName, gymId: gymIdSchema.optional() }).strict();
 export type WorkoutQuery = z.infer<typeof workoutQuerySchema>;
 export const maxWorkoutRangeDays = 14;
 function rangeDays(from: string, to: string) {
@@ -13,7 +15,7 @@ function rangeDays(from: string, to: string) {
 export const workoutRangeQuerySchema = z.object({
   from: dateSchema.describe('First gym-local date, inclusive (YYYY-MM-DD).'),
   to: dateSchema.describe(`Last gym-local date, inclusive (YYYY-MM-DD). At most ${maxWorkoutRangeDays} days after from, counting both ends.`),
-  className: z.string().trim().min(1).max(300).describe('Exact feed wodClass, such as CROSS. Unknown names return no workouts and list the class names seen in the range.'),
+  className: workoutClassName,
   gymId: gymIdSchema.optional(),
 }).strict().refine(query => query.from <= query.to && rangeDays(query.from, query.to) <= maxWorkoutRangeDays);
 export type WorkoutRangeQuery = z.infer<typeof workoutRangeQuerySchema>;

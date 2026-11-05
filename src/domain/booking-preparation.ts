@@ -11,6 +11,14 @@ export const bookingCreationQuerySchema = z.object({
 export type BookingCreationQuery = z.infer<typeof bookingCreationQuerySchema>;
 export const bookingCancellationQuerySchema = bookingCreationQuerySchema;
 export type BookingCancellationQuery = z.infer<typeof bookingCancellationQuerySchema>;
+export const maxPlannedBookingDays = 14;
+export const plannedBookingQuerySchema = z.object({
+  gymId: gymIdSchema.optional(),
+  startDate: dateSchema.describe('First gym-local date, inclusive (YYYY-MM-DD).'),
+  endDate: dateSchema.describe(`Last gym-local date, inclusive. At most ${maxPlannedBookingDays} calendar dates in all.`),
+}).strict().refine(query => query.startDate <= query.endDate
+  && (Date.parse(`${query.endDate}T00:00:00Z`) - Date.parse(`${query.startDate}T00:00:00Z`)) / 86_400_000 < maxPlannedBookingDays);
+export type PlannedBookingQuery = z.infer<typeof plannedBookingQuerySchema>;
 export const bookingExecutionSchema = z.object({
   gymId: gymIdSchema.optional(), actionReference: z.string().regex(/^[a-f0-9]{64}$/), confirmed: z.literal(true).optional(),
 }).strict();
@@ -60,12 +68,13 @@ export function cancellationCandidates(body: unknown, gymId: string, date: strin
   });
 }
 
-export function bookingCandidates(body: unknown, gymId: string, date: string, timeZone: string, query: BookingCreationQuery): InternalBookingCandidate[] {
+/** Booking candidates for a class name and start time; an end time, when given, must match too (a booking plan has none). */
+export function bookingCandidates(body: unknown, gymId: string, date: string, timeZone: string, query: { className: string; startTime: string; endTime?: string }): InternalBookingCandidate[] {
   const sessions = parseClassDay(body, gymId, date, timeZone);
   const rows = (body as { bookings: unknown[] }).bookings;
   return sessions.flatMap((session, index) => {
     const endTime = session.timeLabel.slice(-5);
-    if (session.classType.name !== query.className || session.startTime !== query.startTime || endTime !== query.endTime) return [];
+    if (session.classType.name !== query.className || session.startTime !== query.startTime || (query.endTime !== undefined && endTime !== query.endTime)) return [];
     const flags = rowFields.safeParse(rows[index]);
     const state = !flags.success ? 'unknown' as const : flags.data.bookState === null ? 'unbooked' as const
       : flags.data.bookState === 1 ? 'booked' as const : flags.data.bookState === 0 ? 'waitlisted' as const : 'unknown' as const;

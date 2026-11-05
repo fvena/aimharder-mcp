@@ -22,6 +22,7 @@ It is an independent project, neither affiliated with nor endorsed by AimHarder.
    AIMHARDER_DEFAULT_GYM=your-gym-id
    AIMHARDER_GYM_TIME_ZONES={"your-gym-id":"Europe/Madrid"}
    AIMHARDER_BOOKING_WINDOW_DAYS={"your-gym-id":7}
+   AIMHARDER_WORKOUT_CLASS={"your-gym-id":"CROSS"}
    ```
 
 4. Add the server to your MCP client as a stdio command, for example in Claude Desktop:
@@ -51,10 +52,11 @@ Deploy your own instance (the [Dockerfile](Dockerfile) works on Fly.io, Render, 
 | `get_class_sessions` | Which CROSS classes are there this week, and when does booking open? |
 | `get_class_participants` | Who is coming to today's 14:00 CROSS? Which of my friends? |
 | `prepare_booking_creation` / `execute_booking_creation` | Book next Monday's 14:00 CROSS. |
+| `prepare_planned_bookings` | Book my usual classes next week. |
 | `prepare_booking_cancellation` / `execute_booking_cancellation` | Cancel Wednesday's class. |
 | `execute_late_booking_cancellation` | Cancel inside the late window, accepting a possible credit loss. |
 | `get_upcoming_bookings` / `get_booking_history` | When am I booked? Which classes did I attend? |
-| `get_published_workouts` | What is today's WOD? |
+| `get_published_workouts` | What is today's WOD? And the HYROX one? |
 | `get_published_workouts_range` | Summarize this week's CROSS workouts. |
 | `get_personal_activity` | What did I record this month? |
 | `get_exercise_1rm` / `find_exercise_1rm` / `get_exercise_rm_progression` | What is my Back Squat 1RM, and how has it progressed? |

@@ -93,3 +93,48 @@ test('rejects reversed or overlong ranges before any upstream request', async ()
   }
   expect(requests).toEqual([]);
 });
+
+async function call(name: string, args: Record<string, unknown>, extra: Record<string, string> = {}) {
+  const server = createServer({ AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic-password', AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid"}', ...extra });
+  const client = new Client({ name: 'workout-class-harness', version: '1.0.0' });
+  const [a, b] = InMemoryTransport.createLinkedPair();
+  connections.push({ client, server });
+  await server.connect(b); await client.connect(a);
+  return client.callTool({ name, arguments: args });
+}
+const configured = { AIMHARDER_WORKOUT_CLASS: '{"sample-gym":"CROSS"}' };
+
+test('without className the configured workout class applies, and the day lists every published class', async () => {
+  const result = await call('get_published_workouts', { date: '2026-11-05' }, configured);
+  expect(result.structuredContent).toMatchObject({ className: 'CROSS', classSource: 'configured', status: 'available', classNamesAvailable: ['CROSS', 'HYROX'] });
+  expect(appCalls('activity/workout').map(url => Number(url.searchParams.get('SEID')))).toEqual([14]);
+});
+
+test('a requested className overrides the configured class', async () => {
+  detailDates.set(24, '2026-11-05');
+  const result = await call('get_published_workouts', { date: '2026-11-05', className: 'HYROX' }, configured);
+  expect(result.structuredContent).toMatchObject({ className: 'HYROX', classSource: 'request', status: 'available' });
+  expect(appCalls('activity/workout').map(url => Number(url.searchParams.get('SEID')))).toEqual([24]);
+});
+
+test('without className or configured class, only the published class names are read', async () => {
+  const single = await call('get_published_workouts', { date: '2026-11-05' });
+  expect(single.structuredContent).toMatchObject({ className: null, classSource: null, status: 'class-required', workouts: [], classNamesAvailable: ['CROSS', 'HYROX'] });
+  const content = (await call('get_published_workouts_range', { from: '2026-11-05', to: '2026-11-06' })).structuredContent as RangeResult & { className: null };
+  expect(content.className).toBeNull();
+  expect(content.days.map(day => day.status)).toEqual(['class-required', 'class-required']);
+  expect(content.classNamesInRange).toEqual(['CROSS', 'FUNCTIONAL', 'HYROX']);
+  expect(appCalls('activity/workout')).toEqual([]);
+});
+
+test('the range tool uses the configured class too', async () => {
+  const content = (await call('get_published_workouts_range', { from: '2026-11-05', to: '2026-11-06' }, configured)).structuredContent as RangeResult & { classSource: string };
+  expect(content.classSource).toBe('configured');
+  expect(content.days.map(day => day.workouts.map(w => w.provenance.sourceId))).toEqual([[14], [15]]);
+});
+
+test('rejects an invalid workout class configuration', () => {
+  for (const value of ['"CROSS"', '{"sample-gym":""}', 'not json']) {
+    expect(() => createServer({ AIMHARDER_USERNAME: 'a', AIMHARDER_PASSWORD: 'b', AIMHARDER_WORKOUT_CLASS: value })).toThrow();
+  }
+});

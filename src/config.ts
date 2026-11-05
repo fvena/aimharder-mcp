@@ -10,6 +10,21 @@ const timeZoneSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_+\-/]*$/).refine((z
 const timeZonesSchema = z.record(gymIdSchema, timeZoneSchema);
 const bookingWindowsSchema = z.record(gymIdSchema, z.number().int().min(1).max(60));
 const cancellationWindowsSchema = z.record(gymIdSchema, z.number().int().min(1).max(10_080));
+const className = z.string().trim().min(1).max(300);
+const workoutClassesSchema = z.record(gymIdSchema, className);
+export const weekdays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
+export type Weekday = typeof weekdays[number];
+const plannedClassSchema = z.object({ className, startTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/) }).strict();
+export type PlannedClass = z.infer<typeof plannedClassSchema>;
+const bookingPlansSchema = z.record(gymIdSchema, z.partialRecord(z.enum(weekdays), plannedClassSchema));
+export type BookingPlan = Partial<Record<Weekday, PlannedClass>>;
+
+/** Parse an optional JSON environment value with a schema, or fail with one public error code. */
+function jsonSetting<T>(value: string | undefined, schema: z.ZodType<T>, fallback: T, code: ConstructorParameters<typeof AimHarderError>[0]): T {
+  if (value === undefined) return fallback;
+  try { return schema.parse(JSON.parse(value)); }
+  catch { throw new AimHarderError(code); }
+}
 const environmentSchema = z.object({
   AIMHARDER_USERNAME: nonEmpty,
   AIMHARDER_PASSWORD: nonEmpty,
@@ -19,8 +34,10 @@ const environmentSchema = z.object({
   AIMHARDER_CANCELLATION_WINDOW_MINUTES: z.string().optional(),
   AIMHARDER_REQUIRE_BOOKING_CONFIRMATION: z.enum(['true', 'false']).optional(),
   AIMHARDER_PARTICIPANTS_FILTER: z.string().optional(),
+  AIMHARDER_WORKOUT_CLASS: z.string().optional(),
+  AIMHARDER_BOOKING_PLAN: z.string().optional(),
 });
-export type Configuration = Omit<ReturnType<typeof readConfiguration>, 'requireBookingConfirmation' | 'bookingWindowDays' | 'cancellationWindowMinutes' | 'participantsFilter'> & { requireBookingConfirmation?: boolean; bookingWindowDays?: Record<string, number>; cancellationWindowMinutes?: Record<string, number>; participantsFilter?: 'all' | 'following' };
+export type Configuration = Omit<ReturnType<typeof readConfiguration>, 'requireBookingConfirmation' | 'bookingWindowDays' | 'cancellationWindowMinutes' | 'participantsFilter' | 'workoutClasses' | 'bookingPlans'> & { workoutClasses?: Record<string, string>; bookingPlans?: Record<string, BookingPlan>; requireBookingConfirmation?: boolean; bookingWindowDays?: Record<string, number>; cancellationWindowMinutes?: Record<string, number>; participantsFilter?: 'all' | 'following' };
 
 export function readConfiguration(environment: Record<string, string | undefined>) {
   const parsed = environmentSchema.safeParse(environment);
@@ -51,6 +68,8 @@ export function readConfiguration(environment: Record<string, string | undefined
     bookingWindowDays,
     cancellationWindowMinutes,
     participantsFilter: filter,
+    workoutClasses: jsonSetting(parsed.data.AIMHARDER_WORKOUT_CLASS, workoutClassesSchema, {}, 'INVALID_WORKOUT_CLASS_CONFIGURATION'),
+    bookingPlans: jsonSetting(parsed.data.AIMHARDER_BOOKING_PLAN, bookingPlansSchema, {}, 'INVALID_BOOKING_PLAN_CONFIGURATION') as Record<string, BookingPlan>,
     requireBookingConfirmation: parsed.data.AIMHARDER_REQUIRE_BOOKING_CONFIRMATION !== 'false',
     username: parsed.data.AIMHARDER_USERNAME,
     password: parsed.data.AIMHARDER_PASSWORD,
