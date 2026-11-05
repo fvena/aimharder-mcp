@@ -177,6 +177,8 @@ test('limits failed owner-secret attempts', async () => {
 test('accepts only Claude, ChatGPT, configured or loopback redirect URIs', async () => {
   const base = await start({ MCP_OAUTH_REDIRECT_URIS: 'https://client.example.invalid/callback' });
   expect((await register(base, ['https://attacker.example.invalid/callback'])).status).toBe(400);
+  expect((await register(base, ['https://chatgpt.com/connector/oauth/test-callback'])).status).toBe(201);
+  expect((await register(base, ['https://chatgpt.com/connector/oauth/test-callback?next=elsewhere'])).status).toBe(400);
   expect((await register(base, ['https://chatgpt.com/connector_platform_oauth_redirect'])).status).toBe(201);
   expect((await register(base, ['https://client.example.invalid/callback'])).status).toBe(201);
   expect((await register(base, ['http://127.0.0.1:43210/callback'])).status).toBe(201);

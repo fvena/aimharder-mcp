@@ -2,8 +2,6 @@
 
 Claude and ChatGPT on the web, desktop and mobile can't start a local process. They connect from their own cloud to a **remote MCP server**: a public HTTPS URL. In HTTP mode this server provides one for your account.
 
-For a beginner-friendly walkthrough, see the [step-by-step setup guide](setup-guide.md). This page is the technical reference.
-
 Each person runs their **own instance** for their own account. The instance keeps your AimHarder credentials in your hosting platform's secrets. Nobody else, including the project's authors, sees or stores them.
 
 ## How it works
@@ -81,7 +79,7 @@ The server URL is always `<MCP_PUBLIC_URL>/mcp`.
 
 **Claude** (claude.ai, desktop and mobile apps): open **Customize → Connectors → Add custom connector** and enter the URL. If Claude asks how to identify itself, choose **Register automatically**. Claude opens the approval page; type your owner secret. The connector then appears in the mobile app too.
 
-**ChatGPT** (web): open **Settings → Apps → Advanced settings**, turn on **Developer mode**, then **Create app** with the URL and OAuth authentication. Approve with your owner secret. In a chat, choose Developer mode from the **+** menu and select the app.
+**ChatGPT** (web): open [Plugins](https://chatgpt.com/plugins), select **+ → Add custom MCP server**, enter the server URL and choose OAuth with dynamic client registration. Create and install the plugin, then select it with `@` in a chat. Enter your owner secret on your server's approval page when prompted. The server accepts ChatGPT's per-connection callback at `https://chatgpt.com/connector/oauth/{callback_id}` and its older fixed callback.
 
 **Claude Code**:
 

@@ -133,5 +133,6 @@ export function isAllowedRedirectUri(value: string, allowed: readonly string[]) 
   const url = new URL(value);
   if (url.hash !== '') return false;
   if (isLoopback(url)) return url.protocol === 'http:' || url.protocol === 'https:';
+  if (/^https:\/\/chatgpt\.com\/connector\/oauth\/[A-Za-z0-9_-]+$/.test(value)) return true;
   return url.protocol === 'https:' && allowed.includes(url.href);
 }

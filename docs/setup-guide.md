@@ -23,14 +23,14 @@ Your AimHarder password is stored only in your own server's settings. Nobody els
 | Your AimHarder email and password | The ones you use in the AimHarder app. |
 | A computer | macOS, Windows or Linux, only for the setup. Afterwards you use it from anywhere. |
 | A [Fly.io](https://fly.io) account | Fly runs your server. It asks for a payment card. With the settings in this guide the cost is usually very low (the server sleeps when you're not using it), but check **Billing** in Fly's dashboard. |
-| Claude or ChatGPT | **Claude**: any plan; the Free plan allows one custom connector. Works on the web, the desktop app and the mobile app. **ChatGPT**: a paid plan (Plus, Pro, Business…) with *Developer mode*. Works on the web; the mobile app may not show it. |
+| Claude or ChatGPT | **Claude**: any plan; the Free plan allows one custom connector. Works on the web, the desktop app and the mobile app. **ChatGPT**: use ChatGPT on the web with permission to add a custom MCP server. |
 | A password manager (recommended) | To generate and keep the server's secret. |
 
 ## A few words you'll see
 
 - **Terminal**: a window where you type commands. On macOS open the **Terminal** app; on Windows open **PowerShell** from the Start menu. Paste a command and press Enter.
 - **Server**: the program that runs on Fly and talks to AimHarder for you.
-- **Connector** (Claude) or **app** (ChatGPT): the link between the assistant and your server.
+- **Connector** (Claude) or **plugin** (ChatGPT): the link between the assistant and your server.
 - **Owner secret**: a long password that only you know. You type it once when you connect Claude or ChatGPT, so nobody else can connect to your server.
 
 ---
@@ -215,15 +215,13 @@ The first time Claude uses each tool, it asks for your permission:
 
 ## Step 11. Connect ChatGPT (optional)
 
-On [chatgpt.com](https://chatgpt.com), in a browser:
+Use the same server URL you used for Claude. You can also start here if you skipped the Claude setup.
 
-1. Open **Settings → Apps** (sometimes called *Apps & Connectors*), then **Advanced settings**, and turn on **Developer mode**. If you don't see it, your plan doesn't include it.
-2. Back in **Settings → Apps**, click **Create app**.
-3. Fill in a name (`AimHarder`), a short description, the URL `https://ana-aimharder.fly.dev/mcp` and **OAuth** as authentication. Leave client ID and secret empty.
-4. Confirm that you trust the app and click **Create**.
-5. On the **Authorize AimHarder MCP** page, type your owner secret and click **Authorize**.
-
-To use it, open a new chat, choose **+ → Developer mode** and select the app. Mention it by name in your message ("With AimHarder, …"), or ChatGPT may not use it.
+1. Open [Plugins in ChatGPT](https://chatgpt.com/plugins) in a browser. Select **+ → Add custom MCP server**.
+2. Enter `AimHarder` as the name. Under **Connection**, choose **Server URL** and paste your deployment URL including `/mcp`, for example `https://ana-aimharder.fly.dev/mcp`. Replace `ana-aimharder` with your Fly app name.
+3. Select **OAuth**. If prompted for a registration method, choose **Dynamic Client Registration (DCR)**. Leave **Client ID** and **Client Secret** empty. The server registers ChatGPT automatically.
+4. Review the permissions, select **Create as a plugin**, then **Install**.
+5. Open a new chat, type `@`, select **AimHarder** and ask “Which classes are there tomorrow?” When prompted to authorize, enter your owner secret (`MCP_OWNER_SECRET`) on your own server’s **Authorize AimHarder MCP** page and select **Authorize**.
 
 ## Step 12. Try it
 
@@ -289,7 +287,7 @@ Turn it back on with `fly scale count 1 -a ana-aimharder`. Delete it completely,
 fly apps destroy ana-aimharder
 ```
 
-Also remove the connector in Claude or the app in ChatGPT.
+Also remove the connector in Claude or the plugin in ChatGPT.
 
 ---
 
@@ -313,7 +311,7 @@ Messages starting with `INVALID_…` mean a setting is wrong. The message says w
 | `Error: … missing an app name` | Add `-a ana-aimharder` to the command, or run it inside the project folder. |
 | The authorize page says **Wrong owner secret** | Copy the secret again from your password manager, with no spaces at either end. |
 | **Too many failed attempts** | Wait 15 minutes and try again. |
-| ChatGPT shows *Unregistered redirect_uri* or *redirect_uris must be…* | Add the address from the error to `MCP_OAUTH_REDIRECT_URIS` with `fly secrets set` (see [Change a setting](#change-a-setting)), then connect again. |
+| ChatGPT rejects the plugin settings | Check that **Server URL** uses your own HTTPS address ending in `/mcp` and authentication is **OAuth** with dynamic registration. The server already accepts ChatGPT’s callback URLs. |
 | `AUTHENTICATION_FAILED` when you ask something | AimHarder rejected the email or password. Fix them with `fly secrets set`. |
 | Booking says a time zone is required | Add `AIMHARDER_GYM_TIME_ZONES` (step 7). |
 
