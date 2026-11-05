@@ -42,7 +42,7 @@ const messages = {
   REQUEST_FAILED: 'The AimHarder request failed or attempted a redirect. No further retry was attempted.',
   NO_ACCESSIBLE_GYMS: 'No accessible gym was established from the account response.',
   UNSUPPORTED_MEMBERSHIP: 'The account includes an unverified membership format. Gym discovery could not be completed.',
-  DEFAULT_GYM_REQUIRED: 'Multiple gyms are accessible. Set AIMHARDER_DEFAULT_GYM to one of their gym IDs and restart the server.',
+  DEFAULT_GYM_REQUIRED: 'Multiple gyms are accessible. Choose a default gym on the settings page, or set AIMHARDER_DEFAULT_GYM to one of their gym IDs and restart the server.',
   GYM_NOT_ACCESSIBLE: 'The requested or configured gym is not in the verified accessible gym list.',
 } as const;
 

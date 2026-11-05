@@ -7,6 +7,7 @@ export interface AccountContext {
   gyms: Gym[];
   selectedGym: Gym;
   notices: string[];
+  settingsUrl?: string;
   writeConfirmationPolicy: { bookingCreation: boolean };
   defaults: { workoutClass: string | null; participantsFilter: 'all' | 'following'; bookingPlan: BookingPlan; friends: number };
 }
@@ -21,6 +22,7 @@ export function getAccountContext(ctx: Context, gymId?: string): Promise<Account
       friends: Object.keys(ctx.config.friends ?? {}).length,
     },
     account: { authenticated: true }, gyms: gyms.map((entry) => entry.gym), selectedGym,
+    ...(ctx.settingsUrl === undefined ? {} : { settingsUrl: ctx.settingsUrl }),
     notices: gyms.some(({ gym }) => gym.timeZoneStatus === 'assumed')
       ? ['Europe/Madrid is assumed for gyms without an explicit time-zone mapping. Confirm the gym zone for reliable date queries; AimHarder has not supplied an authoritative zone.']
       : ['Gym time zones come from explicit user configuration, not an upstream time-zone field.'],

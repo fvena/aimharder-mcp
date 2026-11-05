@@ -11,11 +11,13 @@ export interface Context {
   bookingPreparations: BookingPreparationStore;
   resultPreparations: PreparationStore<ExerciseResultPreview>;
   deletionPreparations: PreparationStore<ExerciseResultDeletionPreview>;
+  /** Where the account holder edits their preferences, on the remote server. */
+  settingsUrl?: string;
 }
 
-export function createContext(config: Configuration): Context {
+export function createContext(config: Configuration, settingsUrl?: string): Context {
   return {
-    upstream: new AimHarderUpstream(config), config,
+    upstream: new AimHarderUpstream(config), config, ...(settingsUrl === undefined ? {} : { settingsUrl }),
     bookingPreparations: new BookingPreparationStore(),
     resultPreparations: new PreparationStore<ExerciseResultPreview>(),
     deletionPreparations: new PreparationStore<ExerciseResultDeletionPreview>(),

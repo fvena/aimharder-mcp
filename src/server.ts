@@ -57,6 +57,11 @@ export function createServerFactory(environment: Record<string, string | undefin
   return () => buildServer(ctx);
 }
 
+/** An MCP server over one account's context; the remote transport builds one per request for the signed-in account. */
+export function createServerForContext(ctx: Context) {
+  return buildServer(ctx);
+}
+
 const instructions = [
   'AimHarder for one account holder: classes, bookings, published workouts, personal records and activity at their gym.',
   'Defaults come from the account holder\'s configuration; get_account_context reports them. Apply them unless the account holder asks otherwise:',
@@ -80,6 +85,7 @@ function buildServer(ctx: Context) {
         friends: z.number().int().nonnegative().describe('How many athletes the account holder lists as friends; the following filter includes them.') }),
       account: z.object({ authenticated: z.literal(true) }),
       gyms: z.array(gymSchema), selectedGym: gymSchema, notices: z.array(z.string()),
+      settingsUrl: z.string().optional().describe('On the remote server: the page where the account holder changes these preferences, friends and weekly plan. Share it when they ask how to change them.'),
     }),
     annotations: readOnly,
   }, ({ gymId }) => respond(() => account.getAccountContext(ctx, gymId)));
