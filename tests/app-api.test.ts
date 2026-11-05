@@ -11,6 +11,8 @@ const requests: { method: string; url: URL; body?: FormData }[] = [];
 const app = 'https://aimharder.com/aplic/apiExternal';
 const token = (n = 1) => `42|${Math.floor(Date.now() / 1000) + 90 * 86_400}|${String(n).repeat(32).slice(0, 32)}`;
 let issued = 0;
+// The last token the simulated login issued; compared as issued, so a second boundary cannot change it.
+let issuedToken = '';
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Europe/Madrid' }).format(new Date());
 const months = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
 const spanish = (date: string) => `${Number(date.slice(8))} de ${months[Number(date.slice(5, 7)) - 1]} de ${date.slice(0, 4)}`;
@@ -18,7 +20,7 @@ const session = (extra: Record<string, unknown> = {}) => ({ id: 840420, classId:
 
 beforeAll(() => upstream.listen({ onUnhandledFrame: 'error' }));
 beforeEach(() => {
-  requests.length = 0; issued = 0;
+  requests.length = 0; issued = 0; issuedToken = '';
   upstream.use(
     http.post('https://login.aimharder.es/api/login', () => HttpResponse.json({ data: { userData: { id: 42 }, auth: { authOK: true } } },
       { headers: { 'Set-Cookie': 'amhrdrauth=synthetic-cookie; Domain=.aimharder.es; Path=/' } })),
@@ -31,11 +33,12 @@ beforeEach(() => {
       expect(params.get('mail')).toBe('account@example.invalid');
       if (params.get('pw') !== 'synthetic-password') return HttpResponse.json({ error: 'Correo electrónico y/o contraseña incorrecto' });
       issued++;
-      return HttpResponse.json({ cookie: token(issued), userId: 42, clientBoxes: [] });
+      issuedToken = token(issued);
+      return HttpResponse.json({ cookie: issuedToken, userId: 42, clientBoxes: [] });
     }),
     http.get(`${app}/classAthleteBookings`, ({ request }) => {
       const params = new URL(request.url).searchParams;
-      expect(params.get('token')).toBe(token(issued));
+      expect(params.get('token')).toBe(issuedToken);
       expect([params.get('hcid'), params.get('box')]).toEqual(['840420', '200']);
       return HttpResponse.json({ athletes: [{ id: 1, usid: 42, name: 'Account Holder', pic: 'https://example.invalid/a.jpg', state: 1, insignias: null },
         { id: 2, usid: 77, name: 'Training Partner', pic: 'https://example.invalid/b.jpg', state: 1, insignias: null }] });
@@ -136,7 +139,7 @@ test('previews an exercise result without writing, then saves it once after conf
   expect(form.get('boxLocation')).toBe('200');
   expect(JSON.parse(String(form.get('ejerRate')))).toEqual([expect.objectContaining({ ejerId: 18, ejerName: 'Bench Press', formaReg: 4, valor1: ['6', '6', '6', '6', '6'], valor2: '62.5', tipoud: 0 })]);
   expect(JSON.parse(String(form.get('TIPOWODs')))).toEqual([expect.objectContaining({ type: 6, sstipo: 1, deleted: false })]);
-  expect(form.get('token')).toBe(token(1));
+  expect(form.get('token')).toBe(issuedToken);
 
   const reused = await client.callTool({ name: 'execute_exercise_result', arguments: { actionReference: reference, confirmed: true } });
   expect(JSON.stringify(reused)).toContain('EXERCISE_RESULT_REFERENCE_INVALID');
@@ -176,7 +179,7 @@ describe('deleting an own activity', () => {
       http.get('https://aimharder.es/api/activityCalendar', () => HttpResponse.json({ workouts: calendarIds.length ? { [today]: { rates: { ids: calendarIds }, TIPOWODs: {} } } : [] })),
       http.get('https://aimharder.es/api/activity/workout', ({ request }) => HttpResponse.json(detail(Number(new URL(request.url).searchParams.get('SEID'))))),
       http.post(`${app}/activity/555/:token`, ({ params }) => {
-        expect(params.token).toBe(token(1));
+        expect(params.token).toBe(issuedToken);
         calendarIds = [];
         return new HttpResponse('', { status: 200 });
       }),
