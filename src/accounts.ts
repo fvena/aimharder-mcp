@@ -11,7 +11,7 @@ const ownerScope = 'owner';
 const gymScope = 'gym';
 
 export type SignInError = 'credentials' | 'not-invited' | 'unavailable';
-export type JoinError = 'invitation' | 'credentials' | 'unavailable' | 'owner';
+export type JoinError = 'invitation' | 'credentials' | 'unavailable' | 'owner' | 'no-gym';
 
 /**
  * The accounts a remote server serves: the owner, configured in the environment, and the members the owner invited.
@@ -82,8 +82,8 @@ export class Accounts {
   /** Sign in with an AimHarder account: the owner's configured one, or a member's, verified with AimHarder. */
   async signIn(username: string, password: string): Promise<{ sub: string } | { error: SignInError }> {
     if (this.#isOwnerUsername(username)) return this.#isOwnerPassword(password) ? { sub: ownerSub } : { error: 'credentials' };
-    const verified = await verifyAccount(this.base, username, password);
-    if ('error' in verified) return verified;
+    const verified = await verifyAccount(this.#verificationBase(), username, password);
+    if ('error' in verified) return { error: verified.error === 'no-gym' ? 'not-invited' : verified.error };
     const member = this.store.member(verified.accountId);
     if (!member) return { error: 'not-invited' };
     const stored = this.store.credentials(member.id);
@@ -99,7 +99,7 @@ export class Accounts {
     const invitation = this.store.invitation(token);
     if (!invitation) return { error: 'invitation' };
     if (this.#isOwnerUsername(username)) return { error: 'owner' };
-    const verified = await verifyAccount(this.base, username, password);
+    const verified = await verifyAccount(this.#verificationBase(), username, password);
     if ('error' in verified) return verified;
     if (!this.store.deleteInvitation(invitation.id)) return { error: 'invitation' };
     this.store.addMember(verified.accountId, invitation.label, { username, password });
@@ -110,6 +110,12 @@ export class Accounts {
   removeMember(id: number) {
     this.store.removeMember(id);
     this.#contexts.delete(String(id));
+  }
+
+  /** The environment with the active gyms, to verify that an account belongs to one of them. */
+  #verificationBase(): Configuration {
+    const active = this.gymSettings().activeGyms;
+    return active?.length ? { ...this.base, activeGyms: active } : this.base;
   }
 
   #isOwnerUsername(username: string) {
@@ -129,12 +135,14 @@ const settingsScope = (sub: string) => {
   return id === undefined ? undefined : memberScope(id);
 };
 
-/** Sign in to AimHarder once with these credentials and report the account ID. */
-async function verifyAccount(base: Configuration, username: string, password: string): Promise<{ accountId: number } | { error: 'credentials' | 'unavailable' }> {
+/** Sign in to AimHarder once with these credentials and report the account ID; the account needs an active gym. */
+async function verifyAccount(base: Configuration, username: string, password: string): Promise<{ accountId: number } | { error: 'credentials' | 'unavailable' | 'no-gym' }> {
   try {
     const { accountId } = await new AimHarderUpstream({ ...base, username, password, defaultGym: undefined }).account();
     return { accountId };
   } catch (error) {
-    return { error: error instanceof AimHarderError && error.code === 'AUTHENTICATION_FAILED' ? 'credentials' : 'unavailable' };
+    if (error instanceof AimHarderError && error.code === 'AUTHENTICATION_FAILED') return { error: 'credentials' };
+    if (error instanceof AimHarderError && error.code === 'NO_ACCESSIBLE_GYMS') return { error: 'no-gym' };
+    return { error: 'unavailable' };
   }
 }

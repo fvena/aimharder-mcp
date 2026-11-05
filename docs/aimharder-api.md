@@ -25,8 +25,8 @@ Base: `https://aimharder.com/aplic/apiExternal`. The server identifies as the iO
 | Use | Request |
 | --- | --- |
 | Daily schedule | `GET bookings?day=YYYYMMDD&box=&familyId=&showClasesDisp=0` |
-| Participants | `GET classAthleteBookings?hcid=<session ID>&day=YYYYMMDD&box=` → `athletes[]` (`usid`, `name`, `state`, …) |
-| Followed accounts | `GET user/list?type=1&relId=<userId>&page=<n>` → `users[]` (`id`, `isBox`, `name`, …); an empty page ends the list. `type=0` lists followers. The website serves the same list at `/api/user/list`. |
+| Participants | `GET classAthleteBookings?hcid=<session ID>&day=YYYYMMDD&box=` → `athletes[]` (`usid`, `name`, `state`, `pic`, `insignias`, …). Observed `pic` values are public HTTPS URLs on a CloudFront host (`https://<distribution>.cloudfront.net/<file>.jpg`), readable without a session. |
+| Followed accounts | `GET user/list?type=1&relId=<userId>&page=<n>` → `users[]` (`id`, `isBox`, `name`, …); an empty page ends the list. `type=0` lists followers. The website serves the same list at `/api/user/list`. Not used: friends are chosen on the settings page. |
 | Book | `POST book` form `day`, `id` (session ID), `insist=0`, `showClasesDisp=0` → `bookState`, `id` |
 | Cancel | `POST cancelBook` form `id` (reservation ID), `late=0|1`, `showClasesDisp=0` → `cancelState` |
 | Upcoming and history | `GET nextBookings?box=` → `nextClasses[]`, `history[]` |

@@ -13,10 +13,10 @@ Locally over stdio (default), the server serves one AimHarder account. Remotely 
 | `AIMHARDER_BOOKING_WINDOW_DAYS` | no | JSON object from gym ID to days (1–60). Booking opens that many days before the class, at the same gym-local time. Sessions then report `bookingOpensAt`/`bookingOpen`, and booking previews return `not-yet-open` before that time. |
 | `AIMHARDER_CANCELLATION_WINDOW_MINUTES` | no | JSON object from gym ID to minutes (1–10080). Cancelling within that many minutes of the class may lose a credit. Cancellation previews warn inside the window, and a preview prepared before the window opened becomes `stale`. |
 | `AIMHARDER_REQUIRE_BOOKING_CONFIRMATION` | no | `true` (default) or `false`. With `false`, an explicit request to book an exact class is enough to execute its preview. Cancellations and saving or deleting results always require confirmation. |
-| `AIMHARDER_PARTICIPANTS_FILTER` | no | `all` (default) or `following`. Default for `get_class_participants`: everyone in the class, or only the athletes you follow in AimHarder plus your `AIMHARDER_FRIENDS`. Each call can still choose with `filter`. Follow or unfollow athletes in the AimHarder app. |
-| `AIMHARDER_FRIENDS` | no | JSON object from AimHarder user ID to a label of your choice, for example `{"123456":"Laura"}` (at most 200). The `following` filter includes them, so athletes with a private profile, whom you cannot follow, still count. `get_class_participants` with `filter: all` shows each participant's `userId`. |
+| `AIMHARDER_PARTICIPANTS_FILTER` | no | `all` (default) or `friends`. Default for `get_class_participants`: everyone in the class, or only your `AIMHARDER_FRIENDS`. Each call can still choose with `filter`. |
+| `AIMHARDER_FRIENDS` | no | JSON object from AimHarder user ID to a friend: the `name` you know them by and an optional HTTPS `photoUrl`, for example `{"123456":{"name":"Laura"}}` (at most 200). The `friends` filter shows only them, and participant lists add their `friendName`. `get_class_participants` with `filter: all` shows each participant's `userId` and `photoUrl`. |
 | `AIMHARDER_WORKOUT_CLASS` | no | JSON object from gym ID to the exact workout class name in the gym feed, for example `{"undergroundrv":"CROSS"}`. The workout tools use it when a call has no `className`, so "what is today's workout?" needs no class. Naming another class (for example HYROX) still works. Without it, those calls return `class-required` with the published class names. |
-| `AIMHARDER_BOOKING_PLAN` | no | JSON object from gym ID to a weekly plan: weekday keys `mon`–`sun`, each with an exact `className` and `startTime` (`HH:mm`), for example `{"undergroundrv":{"mon":{"className":"CROSS","startTime":"07:00"}}}`. `prepare_planned_bookings` previews these classes for a date range, so "book next week" needs no class list. Each booking is still previewed and executed separately. |
+| `AIMHARDER_BOOKING_PLAN` | no | JSON object from gym ID to a weekly plan: a list of entries, each with a weekday `day` (`mon`–`sun`), an exact `className` and a `startTime` (`HH:mm`), for example `{"undergroundrv":[{"day":"mon","className":"CROSS","startTime":"07:00"},{"day":"mon","className":"HYROX","startTime":"19:00"}]}`. A weekday may have several classes; the plan is kept in weekday and time order, without duplicates (at most 50 entries). `prepare_planned_bookings` previews these classes for a date range, so "book next week" needs no class list. Each booking is still previewed and executed separately. |
 
 ### Remote (HTTP) transport
 
@@ -39,10 +39,10 @@ On the remote server, each account edits its own preferences at `<MCP_PUBLIC_URL
 | Layer | Who edits it | Settings |
 | --- | --- | --- |
 | Environment | owner, with platform secrets | everything above |
-| Gym rules | owner, at `/admin` | time zone, booking window and cancellation window, per gym |
-| Own preferences | each account, at `/settings` | default gym, workout class, participant filter, weekly booking plan, friends |
+| Gym rules | owner, at `/admin` | the gyms the server uses (the others are hidden from every account and rejected by the tools), and per gym: time zone, booking window and cancellation window |
+| Own preferences | each account, at `/settings` | default gym (with several active gyms), workout class, participant filter, weekly booking plan, friends with their names and pictures |
 
-Per-gym values merge by gym ID, so an empty field falls back to the environment. Members inherit the environment's gym rules and workout class, but not the owner's default gym, booking plan, participant filter or friends, and always confirm bookings (`AIMHARDER_REQUIRE_BOOKING_CONFIRMATION` applies to the owner only). Credentials, secrets, URLs and the redirect allowlist stay environment-only.
+Per-gym values merge by gym ID, so an empty field falls back to the environment. A default gym outside the active gyms is ignored, and an account none of whose gyms is active cannot join or sign in. Members inherit the environment's gym rules and workout class, but not the owner's default gym, booking plan, participant filter or friends, and always confirm bookings (`AIMHARDER_REQUIRE_BOOKING_CONFIRMATION` applies to the owner only). Credentials, secrets, URLs and the redirect allowlist stay environment-only.
 
 The booking and cancellation windows are the rules your gym states. They prevent premature or unexpected requests, but AimHarder still decides whether a booking or cancellation is accepted.
 

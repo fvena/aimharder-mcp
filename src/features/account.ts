@@ -1,4 +1,4 @@
-import { type BookingPlan } from '../config.js';
+import { type BookingPlan, type ParticipantsFilterValue } from '../config.js';
 import { type Gym } from '../upstream.js';
 import { type Context } from './context.js';
 
@@ -9,7 +9,7 @@ export interface AccountContext {
   notices: string[];
   settingsUrl?: string;
   writeConfirmationPolicy: { bookingCreation: boolean };
-  defaults: { workoutClass: string | null; participantsFilter: 'all' | 'following'; bookingPlan: BookingPlan; friends: number };
+  defaults: { workoutClass: string | null; participantsFilter: ParticipantsFilterValue; bookingPlan: BookingPlan; friends: number };
 }
 
 export function getAccountContext(ctx: Context, gymId?: string): Promise<AccountContext> {
@@ -18,7 +18,7 @@ export function getAccountContext(ctx: Context, gymId?: string): Promise<Account
     defaults: {
       workoutClass: ctx.config.workoutClasses && Object.hasOwn(ctx.config.workoutClasses, selectedGym.id) ? ctx.config.workoutClasses[selectedGym.id]! : null,
       participantsFilter: ctx.config.participantsFilter ?? 'all',
-      bookingPlan: ctx.config.bookingPlans && Object.hasOwn(ctx.config.bookingPlans, selectedGym.id) ? ctx.config.bookingPlans[selectedGym.id]! : {},
+      bookingPlan: ctx.config.bookingPlans && Object.hasOwn(ctx.config.bookingPlans, selectedGym.id) ? ctx.config.bookingPlans[selectedGym.id]! : [],
       friends: Object.keys(ctx.config.friends ?? {}).length,
     },
     account: { authenticated: true }, gyms: gyms.map((entry) => entry.gym), selectedGym,

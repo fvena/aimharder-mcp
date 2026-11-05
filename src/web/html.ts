@@ -25,14 +25,17 @@ code,.copy{font-family:ui-monospace,monospace;word-break:break-all;background:va
 .copy{display:block;padding:.6rem;margin:.5rem 0;user-select:all}
 ol li{margin:.35rem 0}
 .check{display:flex;gap:.5rem;align-items:center;font-weight:400;margin:.4rem 0}.check input{width:auto;margin:0}
+.avatar{display:inline-block;flex:none;width:2.5rem;height:2.5rem;border-radius:50%;object-fit:cover;background:var(--line)}
+.friend{display:flex;flex-wrap:wrap;gap:.5rem;align-items:center;margin:.75rem 0}.friend input{margin:0;flex:1 1 8rem;min-width:0}.friend .actions{display:flex;gap:.5rem;margin-left:auto}.friend button{width:auto;margin:0;padding:.5rem .75rem}
+.pair{display:grid;grid-template-columns:1fr 2fr;gap:.75rem}
 `;
 
-/** Send a complete page with a strict policy: no scripts, no framing, nothing loaded from elsewhere, never cached. */
+/** Send a complete page with a strict policy: only this server's scripts, HTTPS images, no framing, never cached. */
 export function sendPage(res: Response, status: number, title: string, body: string) {
   res.status(status)
     .set('Content-Type', 'text/html; charset=utf-8')
     .set('Cache-Control', 'no-store')
-    .set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'")
+    .set('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; script-src 'self'; img-src https:; frame-ancestors 'none'; base-uri 'none'")
     .set('X-Frame-Options', 'DENY')
     .set('Referrer-Policy', 'same-origin')
     .send(`<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">

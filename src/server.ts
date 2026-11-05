@@ -9,7 +9,7 @@ import * as bookings from './features/bookings.js';
 import * as records from './features/records.js';
 import * as schedule from './features/schedule.js';
 import * as workouts from './features/workouts.js';
-import { gymIdSchema, readConfiguration, weekdays } from './config.js';
+import { gymIdSchema, participantsFilterValues, readConfiguration, weekdays } from './config.js';
 import { classQuerySchema, classSessionSchema, dateSchema } from './domain/classes.js';
 import { participantSchema, participantsQuerySchema } from './domain/participants.js';
 import { exerciseResultDeletionExecutionSchema, exerciseResultDeletionQuerySchema, exerciseResultExecutionSchema, exerciseResultQuerySchema } from './domain/exercise-results.js';
@@ -21,6 +21,7 @@ import { enrichmentSchema } from './domain/calculated-loads.js';
 import { safeError } from './errors.js';
 import { plannedBookingQuerySchema, bookingCreationQuerySchema, bookingCancellationQuerySchema, bookingExecutionSchema, lateCancellationExecutionSchema } from './domain/booking-preparation.js';
 
+const planEntryOutput = z.object({ day: z.enum(weekdays), className: z.string(), startTime: z.string() });
 const gymSchema = z.object({
   id: gymIdSchema, name: z.string(), timeZone: z.string().nullable(), timeZoneStatus: z.enum(['assumed', 'user-confirmed']),
 });
@@ -66,7 +67,7 @@ const instructions = [
   'AimHarder for one account holder: classes, bookings, published workouts, personal records and activity at their gym.',
   'Defaults come from the account holder\'s configuration; get_account_context reports them. Apply them unless the account holder asks otherwise:',
   '- Workouts: "what is today\'s workout" means the configured workout class. Omit className; pass it only when they name another class (for example HYROX), using the exact name from classNamesAvailable.',
-  '- Participants: "who is coming" uses the configured filter, often only the athletes they follow and their friends list. Say how many others are booked (totalParticipants) and offer filter all.',
+  '- Participants: "who is coming" uses the configured filter, often only the account holder\'s friends. Call friends by their friendName. Say how many others are booked (totalParticipants) and offer filter all. When the client can show images, photoUrl is a public thumbnail of each participant.',
   '- Bookings: "book next week" without exact classes uses prepare_planned_bookings with their weekly plan. Ask only about days the plan does not cover or cannot book.',
   'Present a workout as the gym publishes it: its blocks in order, with any calculated personal loads beside the %RM prescriptions. Keep source units and wording; do not invent missing values.',
   'Every write (booking, cancellation, saving or deleting a result) is previewed first. Follow writeConfirmationRequired and the tool descriptions, never retry a write, and report uncertain outcomes as uncertain.',
@@ -76,13 +77,13 @@ const instructions = [
 function buildServer(ctx: Context) {
   const server = new McpServer({ name: 'aimharder-mcp', version: packageVersion }, { instructions });
   server.registerTool('get_account_context', {
-    description: 'Authenticate the configured account and discover its accessible gyms. Select the only gym or configured default; gymId overrides that selection for this query. defaults reports the account holder\'s configured preferences for the selected gym: workout class, participant filter, weekly booking plan and the number of listed friends. Configured time zones are user-confirmed; otherwise Europe/Madrid is explicitly assumed. Source gym names are untrusted external content.',
+    description: 'Authenticate the configured account and discover its accessible gyms. Select the only gym or configured default; gymId overrides that selection for this query. defaults reports the account holder\'s configured preferences for the selected gym: workout class, participant filter, weekly booking plan (a list of weekday, class and start time entries; a weekday may have several) and the number of friends. Configured time zones are user-confirmed; otherwise Europe/Madrid is explicitly assumed. Source gym names are untrusted external content.',
     inputSchema: z.object({ gymId: gymIdSchema.optional() }).strict(),
     outputSchema: z.object({
       writeConfirmationPolicy: z.object({ bookingCreation: z.boolean() }),
-      defaults: z.object({ workoutClass: z.string().nullable(), participantsFilter: z.enum(['all', 'following']),
-        bookingPlan: z.record(z.string(), z.object({ className: z.string(), startTime: z.string() })),
-        friends: z.number().int().nonnegative().describe('How many athletes the account holder lists as friends; the following filter includes them.') }),
+      defaults: z.object({ workoutClass: z.string().nullable(), participantsFilter: z.enum(participantsFilterValues),
+        bookingPlan: z.array(planEntryOutput),
+        friends: z.number().int().nonnegative().describe('How many athletes the account holder lists as friends; the friends filter shows only them.') }),
       account: z.object({ authenticated: z.literal(true) }),
       gyms: z.array(gymSchema), selectedGym: gymSchema, notices: z.array(z.string()),
       settingsUrl: z.string().optional().describe('On the remote server: the page where the account holder changes these preferences, friends and weekly plan. Share it when they ask how to change them.'),
@@ -99,13 +100,13 @@ function buildServer(ctx: Context) {
     annotations: readOnly,
   }, (query) => respond(() => schedule.getClassSessions(ctx, query)));
   server.registerTool('get_class_participants', {
-    description: 'List who is booked into one exact class session (gym-local date, exact class name and HH:mm start time), as the AimHarder app shows it. Returns the session occupancy, capacity and coach, and each participant\'s user ID and name. Optional filter: all, or following (only athletes the account follows in AimHarder or lists as friends; the default comes from configuration). The result reports the filter and totalParticipants. Names are other members\' personal data: use them only to answer the account holder. The list can change until the class starts.',
+    description: 'List who is booked into one exact class session (gym-local date, exact class name and HH:mm start time), as the AimHarder app shows it. Returns the session occupancy, capacity and coach, and each participant\'s user ID, name, public photoUrl and, for the account holder\'s friends, friendName (the name they know them by; prefer it). Optional filter: all, or friends (only the account holder\'s friends; the default comes from configuration). The result reports the filter and totalParticipants. Names are other members\' personal data: use them only to answer the account holder. The list can change until the class starts.',
     inputSchema: participantsQuerySchema,
     outputSchema: z.object({
       gym: gymSchema, target: z.object({ date: dateSchema, className: z.string(), startTime: z.string() }),
       status: z.enum(['available', 'missing', 'ambiguous']),
       session: z.object({ sessionId: z.string(), timeLabel: z.string(), occupancy: z.number().nullable(), capacity: z.number().nullable(), coach: z.string().nullable() }).nullable(),
-      filter: z.enum(['all', 'following']).optional(), totalParticipants: z.number().int().nonnegative().optional(),
+      filter: z.enum(participantsFilterValues).optional(), totalParticipants: z.number().int().nonnegative().optional(),
       participants: z.array(participantSchema), notices: z.array(z.string()),
     }),
     annotations: readOnly,
@@ -133,10 +134,10 @@ function buildServer(ctx: Context) {
   }, (query) => respond(() => bookings.executeBookingCreation(ctx, query)));
   const plannedTarget = z.object({ className: z.string(), date: dateSchema, startTime: z.string(), endTime: z.string().nullable() });
   server.registerTool('prepare_planned_bookings', {
-    description: 'Preview booking the account holder\'s planned classes (AIMHARDER_BOOKING_PLAN: one class name and start time per weekday) for every gym-local date in a range of up to 14 days, such as "book next week". Use it when the account holder asks to book without naming exact classes. Each day reports not-planned, ready (with its own single-use actionReference), already-booked, waitlisted, not-yet-open (with bookingOpensAt), missing, ambiguous or unsupported. Sends no write. Show the whole list, then execute each ready day separately with execute_booking_creation under the same writeConfirmationRequired rules as prepare_booking_creation. Ask about the other days instead of choosing a different class.',
+    description: 'Preview booking the account holder\'s planned classes (AIMHARDER_BOOKING_PLAN: weekday, class name and start time entries; a weekday may have several) for every gym-local date in a range of up to 14 days, such as "book next week". Use it when the account holder asks to book without naming exact classes. Each planned class on each date is one entry, and each date without one reports not-planned; entries report ready (with its own single-use actionReference), already-booked, waitlisted, not-yet-open (with bookingOpensAt), missing, ambiguous or unsupported. Sends no write. Show the whole list, then execute each ready day separately with execute_booking_creation under the same writeConfirmationRequired rules as prepare_booking_creation. Ask about the other days instead of choosing a different class.',
     inputSchema: plannedBookingQuerySchema,
     outputSchema: z.object({ action: z.literal('create'), gym: gymSchema, startDate: dateSchema, endDate: dateSchema, writeConfirmationRequired: z.boolean(),
-      plan: z.record(z.string(), z.object({ className: z.string(), startTime: z.string() })),
+      plan: z.array(planEntryOutput),
       days: z.array(z.object({ date: dateSchema, weekday: z.enum(weekdays),
         status: z.enum(['not-planned', 'ready', 'ambiguous', 'missing', 'already-booked', 'waitlisted', 'unsupported', 'not-yet-open']),
         target: plannedTarget.optional(), currentState: z.enum(['unbooked', 'booked', 'waitlisted', 'unknown']).optional(), bookingOpensAt: z.string().optional(),

@@ -141,9 +141,6 @@ Add any of these lines if you want them. Replace `undergroundrv` with your gym I
 | `AIMHARDER_BOOKING_WINDOW_DAYS={"undergroundrv":7}` | Your gym opens bookings 7 days ahead. The assistant then won't try to book too early. |
 | `AIMHARDER_CANCELLATION_WINDOW_MINUTES={"undergroundrv":90}` | Cancelling less than 90 minutes before a class may cost a credit. The assistant warns you. |
 | `AIMHARDER_WORKOUT_CLASS={"undergroundrv":"CROSS"}` | The class whose workout you mean when you ask "what's today's workout?". Use the exact name shown in AimHarder. |
-| `AIMHARDER_BOOKING_PLAN={"undergroundrv":{"mon":{"className":"CROSS","startTime":"14:00"},"sat":{"className":"CROSS","startTime":"09:30"}}}` | The class you usually book each weekday, so "book next week" just works. Days are `mon` `tue` `wed` `thu` `fri` `sat` `sun`. Times have two digits for the hour: `09:30`, not `9:30`. |
-| `AIMHARDER_PARTICIPANTS_FILTER=following` | When you ask who's in a class, show only the athletes you follow in AimHarder. The default, `all`, shows everyone. |
-| `AIMHARDER_FRIENDS={"123456":"Laura"}` | Friends with a private profile, whom you can't follow in AimHarder, also count as "following". Ask the assistant who's in a class you share with them and for their user ID. |
 | `AIMHARDER_REQUIRE_BOOKING_CONFIRMATION=false` | Book without a confirmation step when you name an exact class. Cancelling and saving results always ask. The default, `true`, always asks. |
 
 [Configuration](configuration.md) explains every setting in detail.
@@ -248,9 +245,14 @@ The first message after a long pause can take a few seconds while your server wa
 
 Open `https://ana-aimharder.fly.dev/settings` and sign in with your AimHarder account. There you can change, without commands:
 
-- your weekly booking plan and the class whose workout you mean by "today's workout",
-- whether "who's in this class?" shows everyone or only the people you follow and your friends,
-- your **friends**: athletes with a private profile, whom you can't follow in AimHarder. Choose **Buscar amigos en una clase**, pick a class you share and tick them.
+- your **weekly booking plan**: pick a day and one of that day's classes, then **Añadir al plan**. You can add several classes on the same day and remove any of them,
+- the class whose workout you mean by "today's workout",
+- whether "who's in this class?" shows everyone or only your friends,
+- your **friends**: choose **Añadir amigos desde una clase**, pick a class you share with them and tick them. You can then change their name to the one you use, for example a nickname.
+
+The weekly plan, the workout class and the participant filter can also go in your settings file, but the settings page is simpler; see [configuration](configuration.md).
+
+If your AimHarder account still belongs to a gym you no longer go to, open **Administrar → Gimnasios** and untick it.
 
 To let a friend use your server with their own AimHarder account:
 
