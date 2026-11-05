@@ -27,7 +27,8 @@ export function prepareBookingCreation(ctx: Context, input: BookingCreationQuery
 
 /**
  * Preview booking each planned class (AIMHARDER_BOOKING_PLAN) in a date range: one single-use reference per
- * ready class, each executed separately with execute_booking_creation. Days without a plan entry are listed as not-planned.
+ * ready class, each executed separately with execute_booking_creation. A day with several planned classes has one entry per class;
+ * days without a plan entry are listed as not-planned.
  */
 export function preparePlannedBookings(ctx: Context, input: PlannedBookingQuery) {
   const parsed = plannedBookingQuerySchema.safeParse(input);
@@ -37,16 +38,18 @@ export function preparePlannedBookings(ctx: Context, input: PlannedBookingQuery)
     const { gym, boxId } = session;
     if (gym.timeZoneStatus !== 'user-confirmed' || !gym.timeZone) throw new AimHarderError('CONFIRMED_GYM_TIME_ZONE_REQUIRED');
     if (boxId === undefined) throw new AimHarderError('INVALID_CLASS_RESPONSE');
-    const plan = ctx.config.bookingPlans && Object.hasOwn(ctx.config.bookingPlans, gym.id) ? ctx.config.bookingPlans[gym.id]! : {};
+    const plan = ctx.config.bookingPlans && Object.hasOwn(ctx.config.bookingPlans, gym.id) ? ctx.config.bookingPlans[gym.id]! : [];
     const days = [];
     for (const date of calendarDates(query.startDate, query.endDate)) {
       const weekday = weekdays[(new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7]!;
-      const planned = plan[weekday];
-      if (!planned) { days.push({ date, weekday, status: 'not-planned' as const }); continue; }
-      const { gym: _gym, action: _action, ...result } = await prepareOneBooking(ctx, session, boxId, gym.timeZone, { date, ...planned });
-      days.push({ date, weekday, ...result });
+      const entries = plan.filter((entry) => entry.day === weekday);
+      if (!entries.length) { days.push({ date, weekday, status: 'not-planned' as const }); continue; }
+      for (const { className, startTime } of entries) {
+        const { gym: _gym, action: _action, ...result } = await prepareOneBooking(ctx, session, boxId, gym.timeZone, { date, className, startTime });
+        days.push({ date, weekday, ...result });
+      }
     }
-    const planned = Object.keys(plan).length > 0;
+    const planned = plan.length > 0;
     return { action: 'create' as const, gym, startDate: query.startDate, endDate: query.endDate, plan, days,
       writeConfirmationRequired: ctx.config.requireBookingConfirmation !== false,
       notices: [

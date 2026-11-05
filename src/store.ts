@@ -32,8 +32,11 @@ export class Store {
         CREATE TABLE members (id INTEGER PRIMARY KEY, label TEXT NOT NULL, credentials TEXT NOT NULL, generation TEXT NOT NULL, created_at TEXT NOT NULL);
         CREATE TABLE invitations (id TEXT PRIMARY KEY, label TEXT NOT NULL, expires_at TEXT NOT NULL);
         CREATE TABLE settings (scope TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
-        PRAGMA user_version = 1;`);
-    } else if (version !== 1) {
+        PRAGMA user_version = 2;`);
+    } else if (version === 1) {
+      // Version 2 changed the booking plan, friends and participant filter formats: personal settings start over.
+      this.#db.exec("DELETE FROM settings WHERE scope <> 'gym'; PRAGMA user_version = 2;");
+    } else if (version !== 2) {
       throw new Error('Unsupported data file version');
     }
   }

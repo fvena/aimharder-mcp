@@ -14,14 +14,29 @@ const className = z.string().trim().min(1).max(300);
 const workoutClassesSchema = z.record(gymIdSchema, className);
 export const weekdays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 export type Weekday = typeof weekdays[number];
-const plannedClassSchema = z.object({ className, startTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/) }).strict();
-export type PlannedClass = z.infer<typeof plannedClassSchema>;
-const bookingPlansSchema = z.record(gymIdSchema, z.partialRecord(z.enum(weekdays), plannedClassSchema));
-export type BookingPlan = Partial<Record<Weekday, PlannedClass>>;
-/** Friends: AimHarder user IDs (as strings) to a label chosen by the account holder. */
-export const friendsSchema = z.record(z.string().regex(/^[1-9]\d{0,15}$/), z.string().trim().min(1).max(100))
+export const planEntrySchema = z.object({ day: z.enum(weekdays), className, startTime: z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/) }).strict();
+export type PlanEntry = z.infer<typeof planEntrySchema>;
+/** A gym's weekly booking plan: any number of classes per weekday, kept in weekday and start-time order without duplicates. */
+export type BookingPlan = PlanEntry[];
+const planKey = (entry: PlanEntry) => `${entry.day}|${entry.startTime}|${entry.className}`;
+export function sortPlan(plan: BookingPlan): BookingPlan {
+  const unique = new Map(plan.map((entry) => [planKey(entry), entry]));
+  return [...unique.values()].sort((a, b) => weekdays.indexOf(a.day) - weekdays.indexOf(b.day) || a.startTime.localeCompare(b.startTime) || a.className.localeCompare(b.className));
+}
+const bookingPlanSchema = z.array(planEntrySchema).max(50).transform(sortPlan);
+const bookingPlansSchema = z.record(gymIdSchema, bookingPlanSchema);
+/** A friend: the name the account holder knows them by and, when known, their public profile picture. */
+export const friendSchema = z.object({
+  name: z.string().trim().min(1).max(100),
+  photoUrl: z.string().max(500).refine((value) => URL.canParse(value) && new URL(value).protocol === 'https:').optional(),
+}).strict();
+export type Friend = z.infer<typeof friendSchema>;
+/** Friends by AimHarder user ID (as a string). */
+export const friendsSchema = z.record(z.string().regex(/^[1-9]\d{0,15}$/), friendSchema)
   .refine((friends) => Object.keys(friends).length <= 200);
-export type Friends = Record<string, string>;
+export type Friends = Record<string, Friend>;
+export const participantsFilterValues = ['all', 'friends'] as const;
+export type ParticipantsFilterValue = typeof participantsFilterValues[number];
 
 /** Parse an optional JSON environment value with a schema, or fail with one public error code. */
 function jsonSetting<T>(value: string | undefined, schema: z.ZodType<T>, fallback: T, code: ConstructorParameters<typeof AimHarderError>[0]): T {
@@ -42,7 +57,7 @@ const environmentSchema = z.object({
   AIMHARDER_BOOKING_PLAN: z.string().optional(),
   AIMHARDER_FRIENDS: z.string().optional(),
 });
-export type Configuration = Omit<ReturnType<typeof readConfiguration>, 'requireBookingConfirmation' | 'bookingWindowDays' | 'cancellationWindowMinutes' | 'participantsFilter' | 'workoutClasses' | 'bookingPlans' | 'friends'> & { friends?: Friends; workoutClasses?: Record<string, string>; bookingPlans?: Record<string, BookingPlan>; requireBookingConfirmation?: boolean; bookingWindowDays?: Record<string, number>; cancellationWindowMinutes?: Record<string, number>; participantsFilter?: 'all' | 'following' };
+export type Configuration = Omit<ReturnType<typeof readConfiguration>, 'requireBookingConfirmation' | 'bookingWindowDays' | 'cancellationWindowMinutes' | 'participantsFilter' | 'workoutClasses' | 'bookingPlans' | 'friends'> & { friends?: Friends; activeGyms?: string[]; workoutClasses?: Record<string, string>; bookingPlans?: Record<string, BookingPlan>; requireBookingConfirmation?: boolean; bookingWindowDays?: Record<string, number>; cancellationWindowMinutes?: Record<string, number>; participantsFilter?: ParticipantsFilterValue };
 
 export function readConfiguration(environment: Record<string, string | undefined>) {
   const parsed = environmentSchema.safeParse(environment);
@@ -66,8 +81,8 @@ export function readConfiguration(environment: Record<string, string | undefined
     }
   } catch { throw new AimHarderError('INVALID_CANCELLATION_WINDOW_CONFIGURATION'); }
   const filterValue = parsed.data.AIMHARDER_PARTICIPANTS_FILTER ?? 'all';
-  if (filterValue !== 'all' && filterValue !== 'following') throw new AimHarderError('INVALID_PARTICIPANTS_FILTER_CONFIGURATION');
-  const filter: 'all' | 'following' = filterValue;
+  if (filterValue !== 'all' && filterValue !== 'friends') throw new AimHarderError('INVALID_PARTICIPANTS_FILTER_CONFIGURATION');
+  const filter: ParticipantsFilterValue = filterValue;
   return {
     gymTimeZones,
     bookingWindowDays,
@@ -88,7 +103,7 @@ export const userSettingsSchema = z.object({
   defaultGym: gymIdSchema.optional(),
   workoutClasses: workoutClassesSchema.optional(),
   bookingPlans: bookingPlansSchema.optional(),
-  participantsFilter: z.enum(['all', 'following']).optional(),
+  participantsFilter: z.enum(participantsFilterValues).optional(),
   friends: friendsSchema.optional(),
 }).strict();
 export type UserSettings = z.infer<typeof userSettingsSchema>;
@@ -97,19 +112,27 @@ export const gymSettingsSchema = z.object({
   gymTimeZones: timeZonesSchema.optional(),
   bookingWindowDays: bookingWindowsSchema.optional(),
   cancellationWindowMinutes: cancellationWindowsSchema.optional(),
+  /** Gyms this server uses; the others are hidden from every account. Empty or absent: every gym. */
+  activeGyms: z.array(gymIdSchema).max(20).optional(),
 }).strict();
 export type GymSettings = z.infer<typeof gymSettingsSchema>;
 
-/** Layer gym settings, then the account's own settings, over a configuration. Per-gym values merge by gym ID. */
+/**
+ * Layer gym settings, then the account's own settings, over a configuration. Per-gym values merge by gym ID.
+ * A default gym outside the active gyms is dropped.
+ */
 export function applySettings<T extends Configuration>(base: T, gym: GymSettings, user: UserSettings): T {
+  const activeGyms = gym.activeGyms?.length ? gym.activeGyms : undefined;
+  const defaultGym = user.defaultGym ?? base.defaultGym;
   return {
     ...base,
+    ...(activeGyms ? { activeGyms } : {}),
+    defaultGym: defaultGym !== undefined && activeGyms && !activeGyms.includes(defaultGym) ? undefined : defaultGym,
     gymTimeZones: { ...base.gymTimeZones, ...gym.gymTimeZones },
     bookingWindowDays: { ...base.bookingWindowDays, ...gym.bookingWindowDays },
     cancellationWindowMinutes: { ...base.cancellationWindowMinutes, ...gym.cancellationWindowMinutes },
     workoutClasses: { ...base.workoutClasses, ...user.workoutClasses },
-    bookingPlans: { ...base.bookingPlans, ...(user.bookingPlans as Record<string, BookingPlan> | undefined) },
-    ...(user.defaultGym === undefined ? {} : { defaultGym: user.defaultGym }),
+    bookingPlans: { ...base.bookingPlans, ...user.bookingPlans },
     ...(user.participantsFilter === undefined ? {} : { participantsFilter: user.participantsFilter }),
     ...(user.friends === undefined ? {} : { friends: user.friends }),
   };

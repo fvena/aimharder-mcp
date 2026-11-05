@@ -1,7 +1,6 @@
 import { AimHarderError } from '../errors.js';
 import { type Gym } from '../upstream.js';
-import { parseFollowingPage, parseParticipants, participantsQuerySchema, type ParticipantsQuery } from '../domain/participants.js';
-import { type GymSession } from '../upstream.js';
+import { parseParticipants, participantsQuerySchema, type ParticipantsQuery } from '../domain/participants.js';
 import { calendarDates, classQuerySchema, parseClassDay, type ClassQuery, type ClassSession } from '../domain/classes.js';
 import { bookingWindow } from '../domain/booking-preparation.js';
 import { gymRule, type Context } from './context.js';
@@ -64,26 +63,19 @@ export function getClassParticipants(ctx: Context, input: ParticipantsQuery) {
     const classSession = sessions[0]!;
     const all = parseParticipants(await session.read({ kind: 'participants', boxId, date: query.date, sessionId: classSession.sourceId }));
     const filter = query.filter ?? ctx.config.participantsFilter ?? 'all';
-    const friends = new Set(Object.keys(ctx.config.friends ?? {}).map(Number));
-    const followed = filter === 'following' && all.length ? await followedAthletes(session) : new Set<number>();
-    const participants = filter === 'following' ? all.filter(participant => followed.has(participant.userId) || friends.has(participant.userId)) : all;
+    const friends = ctx.config.friends ?? {};
+    const named: (typeof all[number] & { friendName?: string })[] = all.map(participant => {
+      const friend = Object.hasOwn(friends, String(participant.userId)) ? friends[String(participant.userId)] : undefined;
+      return friend ? { ...participant, friendName: friend.name } : participant;
+    });
+    const participants = filter === 'friends' ? named.filter(participant => participant.friendName !== undefined) : named;
     return { ...base, status: 'available' as const, filter, totalParticipants: all.length,
       session: { sessionId: classSession.sessionId, timeLabel: classSession.timeLabel, occupancy: classSession.occupancy, capacity: classSession.capacity, coach: classSession.coach },
       participants, notices: [
         'Participants come from the AimHarder app API for this exact session. The list can change until the class starts; sourceState is a raw value whose meaning is unverified.',
-        ...(filter === 'following' ? [`Filtered to athletes the account follows in AimHarder or lists as friends: ${participants.length} of ${all.length} participants. Follow athletes in the AimHarder app, or add athletes with a private profile to the friends list, to change this list.`] : []),
+        ...(filter === 'friends' ? [`Filtered to the account holder's friends: ${participants.length} of ${all.length} participants. Friends are added on the settings page.`] : []),
+        'photoUrl is a public picture URL from AimHarder; friendName is the name the account holder uses for that friend.',
         privacy,
       ] };
   });
-}
-
-/** User IDs of the athletes the account follows, across every page of the followed list. */
-async function followedAthletes(session: GymSession) {
-  const ids = new Set<number>();
-  for (let page = 0; page < 20; page++) {
-    const { size, athleteIds } = parseFollowingPage(await session.read({ kind: 'following', page }));
-    athleteIds.forEach(id => ids.add(id));
-    if (size === 0) return ids;
-  }
-  throw new AimHarderError('INVALID_FOLLOWING_RESPONSE');
 }
