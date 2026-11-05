@@ -1,5 +1,5 @@
 import express, { type NextFunction, type Request, type RequestHandler, type Response } from 'express';
-import { friendsSchema, gymIdSchema, gymSettingsSchema, sortPlan, weekdays, type BookingPlan, type Friends, type GymSettings, type HttpConfiguration, type UserSettings, type Weekday } from '../config.js';
+import { friendsSchema, gymIdSchema, gymSettingsSchema, sortPlan, weekdays, type BookingPlan, type Friends, type GymSettings, type HttpConfiguration, type Weekday } from '../config.js';
 import { type Accounts } from '../accounts.js';
 import { getClassParticipants, getClassSessions } from '../features/schedule.js';
 import type { Context } from '../features/context.js';
@@ -170,7 +170,7 @@ export function webRouter(config: HttpConfiguration, accounts: Accounts, provide
     } catch { /* without a timetable, the plan can still be read and pruned */ }
     return timetable;
   };
-  const saveFriends = (sub: string, friends: Friends) => accounts.saveUserSettings(sub, { ...accounts.userSettings(sub), friends });
+  const saveFriends = (sub: string, friends: Friends) => accounts.updatePreferences(sub, (current) => ({ ...current, friends }));
 
   router.get('/assets/app.js', (_req, res) => {
     res.type('text/javascript').set('Cache-Control', 'no-cache').set('X-Content-Type-Options', 'nosniff').send(appScript);
@@ -272,7 +272,7 @@ ${signInForm({ action: `/invite/${encodeURIComponent(token)}`, submit: 'Aceptar 
   router.get('/settings', signedIn, async (req, res) => {
     const sub = res.locals.sub as string;
     const ctx = context(res);
-    const config = accounts.configuration(sub);
+    const config = accounts.preferences(sub);
     const gyms = await gymsOf(ctx);
     const friends = Object.entries(config?.friends ?? {}).sort(([, a], [, b]) => a.name.localeCompare(b.name, 'es'));
     let sections: string;
@@ -281,7 +281,7 @@ ${signInForm({ action: `/invite/${encodeURIComponent(token)}`, submit: 'Aceptar 
       const heading = (gym: Gym) => (gyms.length > 1 ? `<h3>${e(gym.name)}</h3>` : '');
       const plan = `<section id="plan"><h2>Plan semanal de reservas</h2><p class="lead">Las clases que sueles reservar. Con ellas basta con decir «resérvame la semana que viene». Puedes añadir varias el mismo día.</p>${notice(req, 'plan')}
 ${gyms.map((gym) => {
-        const entries: BookingPlan = config.bookingPlans?.[gym.id] ?? [];
+        const entries: BookingPlan = config.bookingPlans[gym.id] ?? [];
         const timetable = timetables.get(gym.id)!;
         const known = (day: Weekday, startTime: string, className: string) => timetable.byDay[day].some((slot) => slot.startTime === startTime && slot.className === className);
         const haveTimetable = timetable.names.length > 0;
@@ -299,7 +299,7 @@ ${haveTimetable ? `<form method="post" action="/settings/plan/add" data-plan><in
 ${gyms.length > 1 ? `<label for="defaultGym">Gimnasio por defecto</label><select id="defaultGym" name="defaultGym">${gyms.map((gym) => `<option value="${e(gym.id)}"${config.defaultGym === gym.id ? ' selected' : ''}>${e(gym.name)}</option>`).join('')}</select>
 <p class="hint">El que se usa cuando no nombras ninguno.</p>` : ''}
 ${gyms.map((gym) => {
-        const current = config.workoutClasses?.[gym.id] ?? '';
+        const current = config.workoutClasses[gym.id] ?? '';
         const names = timetables.get(gym.id)!.names;
         const options = ['<option value="">Ninguna</option>', ...names.map((name) => `<option value="${e(name)}"${name === current ? ' selected' : ''}>${e(name)}</option>`),
           ...(current && !names.includes(current) ? [`<option value="${e(current)}" selected>${e(current)} (no aparece en el horario de los próximos siete días)</option>`] : [])];
@@ -331,25 +331,22 @@ ${friendList}</section>`);
   router.post('/settings/preferences', sameOrigin, signedIn, form, (req, res) => {
     const sub = res.locals.sub as string;
     const body = req.body as Body;
-    const next: UserSettings = { ...accounts.userSettings(sub) };
-    const workoutClasses = { ...next.workoutClasses };
-    for (const [key, value] of Object.entries(body)) {
-      if (!key.startsWith('workout:') || typeof value !== 'string') continue;
-      const gymId = key.slice('workout:'.length);
-      if (value.trim()) workoutClasses[gymId] = value.trim(); else delete workoutClasses[gymId];
-    }
-    next.workoutClasses = workoutClasses;
-    const filter = field(body, 'participantsFilter');
-    if (filter) next.participantsFilter = filter as 'all' | 'friends';
-    const defaultGym = field(body, 'defaultGym');
-    if (defaultGym) next.defaultGym = defaultGym;
-    save(res, 'preferencias', () => accounts.saveUserSettings(sub, next));
+    save(res, 'preferencias', () => accounts.updatePreferences(sub, (current) => {
+      const workoutClasses = { ...current.workoutClasses };
+      for (const [key, value] of Object.entries(body)) {
+        if (!key.startsWith('workout:') || typeof value !== 'string') continue;
+        const gymId = key.slice('workout:'.length);
+        if (value.trim()) workoutClasses[gymId] = value.trim(); else delete workoutClasses[gymId];
+      }
+      const filter = field(body, 'participantsFilter');
+      const defaultGym = field(body, 'defaultGym');
+      return { ...current, workoutClasses,
+        ...(filter ? { participantsFilter: filter as 'all' | 'friends' } : {}), ...(defaultGym ? { defaultGym } : {}) };
+    }));
   });
 
   const savePlan = (sub: string, gymId: string, change: (plan: BookingPlan) => BookingPlan) => {
-    const settings = accounts.userSettings(sub);
-    const current = accounts.configuration(sub)?.bookingPlans?.[gymId] ?? [];
-    accounts.saveUserSettings(sub, { ...settings, bookingPlans: { ...settings.bookingPlans, [gymId]: sortPlan(change(current)) } });
+    accounts.updatePreferences(sub, (current) => ({ ...current, bookingPlans: { ...current.bookingPlans, [gymId]: sortPlan(change(current.bookingPlans[gymId] ?? [])) } }));
   };
   router.post('/settings/plan/add', sameOrigin, signedIn, form, (req, res) => {
     const sub = res.locals.sub as string;
@@ -369,7 +366,7 @@ ${friendList}</section>`);
   router.post('/settings/friends/add', sameOrigin, signedIn, form, (req, res) => {
     const sub = res.locals.sub as string;
     const body = req.body as Body;
-    const friends: Friends = { ...accounts.configuration(sub)?.friends };
+    const friends: Friends = { ...accounts.preferences(sub)?.friends };
     const ids = list(body, 'friend').map((id) => id.trim());
     for (const id of ids) {
       const photoUrl = field(body, `photo:${id}`);
@@ -383,7 +380,7 @@ ${friendList}</section>`);
   router.post('/settings/friends/rename', sameOrigin, signedIn, form, (req, res) => {
     const sub = res.locals.sub as string;
     const body = req.body as Body;
-    const friends: Friends = { ...accounts.configuration(sub)?.friends };
+    const friends: Friends = { ...accounts.preferences(sub)?.friends };
     for (const key of Object.keys(body)) {
       const id = key.startsWith('name:') ? key.slice('name:'.length) : '';
       if (id && Object.hasOwn(friends, id)) friends[id] = { ...friends[id]!, name: field(body, key) };
@@ -394,7 +391,7 @@ ${friendList}</section>`);
   });
   router.post('/settings/friends/remove', sameOrigin, signedIn, form, (req, res) => {
     const sub = res.locals.sub as string;
-    const friends: Friends = { ...accounts.configuration(sub)?.friends };
+    const friends: Friends = { ...accounts.preferences(sub)?.friends };
     delete friends[field(req.body as Body, 'id')];
     save(res, 'amigos', () => saveFriends(sub, friends), 'friend-removed');
   });
@@ -408,14 +405,14 @@ ${friendList}</section>`);
       layout(res, 503, 'Añadir amigos', 'settings', '<h1>Añadir amigos</h1><p class="error">No se ha podido consultar tu cuenta en AimHarder. Recarga la página en unos minutos.</p><p><a href="/settings#amigos">Volver a Ajustes</a></p>');
       return;
     }
-    const gym = gyms.find((entry) => entry.id === query(req, 'gym')) ?? gyms.find((entry) => entry.id === ctx.config.defaultGym) ?? gyms[0]!;
+    const gym = gyms.find((entry) => entry.id === query(req, 'gym')) ?? gyms.find((entry) => entry.id === accounts.preferences(sub)?.defaultGym) ?? gyms[0]!;
     const date = /^\d{4}-\d{2}-\d{2}$/.test(query(req, 'date')) ? query(req, 'date') : today(gym.timeZone);
     let content = '';
     try {
       if (query(req, 'class') && query(req, 'time')) {
         const result = await getClassParticipants(ctx, { date, className: query(req, 'class'), startTime: query(req, 'time'), gymId: gym.id, filter: 'all' });
         const { accountId } = await ctx.upstream.account();
-        const friends: Friends = { ...accounts.configuration(sub)?.friends };
+        const friends: Friends = { ...accounts.preferences(sub)?.friends };
         const people = result.participants.filter((participant) => participant.userId !== accountId);
         // Keep friends' pictures current with what AimHarder shows now.
         let refreshed = false;

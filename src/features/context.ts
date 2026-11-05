@@ -1,35 +1,19 @@
-import { BookingPreparationStore } from '../domain/booking-preparation.js';
 import type { Configuration } from '../config.js';
-import { AimHarderError } from '../errors.js';
-import { PreparationStore, type ExerciseResultDeletionPreview, type ExerciseResultPreview } from '../domain/exercise-results.js';
 import { AimHarderUpstream } from '../upstream.js';
+import { preferencesOf, type Preferences } from '../preferences.js';
+import { WriteActions } from './writes.js';
 
-/** Everything a feature needs: AimHarder access, configuration and the single-use preview references. */
+/** Everything a feature needs: AimHarder access, the account holder's preferences and their writes' single-use references. */
 export interface Context {
   upstream: AimHarderUpstream;
-  config: Configuration;
-  bookingPreparations: BookingPreparationStore;
-  resultPreparations: PreparationStore<ExerciseResultPreview>;
-  deletionPreparations: PreparationStore<ExerciseResultDeletionPreview>;
+  preferences: Preferences;
+  writes: WriteActions;
   /** Where the account holder edits their preferences, on the remote server. */
   settingsUrl?: string;
 }
 
 export function createContext(config: Configuration, settingsUrl?: string): Context {
-  return {
-    upstream: new AimHarderUpstream(config), config, ...(settingsUrl === undefined ? {} : { settingsUrl }),
-    bookingPreparations: new BookingPreparationStore(),
-    resultPreparations: new PreparationStore<ExerciseResultPreview>(),
-    deletionPreparations: new PreparationStore<ExerciseResultDeletionPreview>(),
-  };
-}
-
-/** Writes need `confirmed: true` unless the account holder turned confirmation off for that action. */
-export function requireWriteConfirmation(marker: true | undefined, required = true) {
-  if (required && marker !== true) throw new AimHarderError('WRITE_CONFIRMATION_REQUIRED');
-}
-
-/** A configured per-gym rule (booking window days, cancellation window minutes), if any. */
-export function gymRule(rules: Record<string, number> | undefined, gymId: string) {
-  return rules && Object.hasOwn(rules, gymId) ? rules[gymId] : undefined;
+  const upstream = new AimHarderUpstream(config);
+  const preferences = preferencesOf(config);
+  return { upstream, preferences, writes: new WriteActions(upstream, preferences), ...(settingsUrl === undefined ? {} : { settingsUrl }) };
 }

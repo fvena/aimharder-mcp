@@ -5,7 +5,7 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import { createServer } from '../src/server.js';
 import { appBase, appLogin } from './support/app-api.js';
-import { insideCancellationWindow, BookingPreparationStore, type BookingCancellationPreview } from '../src/domain/booking-preparation.js';
+import { insideCancellationWindow } from '../src/domain/booking-preparation.js';
 
 const upstream = setupServer();
 const connections: { client: Client; server: ReturnType<typeof createServer> }[] = [];
@@ -129,21 +129,3 @@ test('malformed source data fails safely without leaking source text', async () 
   expect(requests.filter(({ path }) => path === '/api/cancelBook')).toHaveLength(0);
 });
 
-test('cancellation reference is bound to action, account, gym and expiry', () => {
-  const store = new BookingPreparationStore();
-  const preview: BookingCancellationPreview = { action: 'cancel', gym: { id: 'sample-gym', name: 'Sample Gym', timeZone: 'Europe/Madrid', timeZoneStatus: 'user-confirmed' },
-    target: { className: 'Open Box', date: '2026-09-26', startTime: '10:00', endTime: '11:00' },
-    currentState: 'booked', credit: { possibleLoss: 'Unknown', balance: null, entitlementPeriod: null }, notices: [] };
-  const first = store.issueCancellation(42, 200, 900, preview);
-  preview.target.className = 'Changed';
-  expect(store.take(first.actionReference, 'cancel', 42, 'sample-gym')).toMatchObject({ reservationId: 900, preview: { target: { className: 'Open Box' } } });
-  expect(store.take(first.actionReference, 'cancel', 42, 'sample-gym')).toBeNull();
-  const second = store.issueCancellation(42, 200, 900, preview);
-  expect(store.take(second.actionReference, 'create', 42, 'sample-gym')).toBeNull();
-  const third = store.issueCancellation(42, 200, 900, preview);
-  expect(store.take(third.actionReference, 'cancel', 43, 'sample-gym')).toBeNull();
-  const fourth = store.issueCancellation(42, 200, 900, preview);
-  vi.useFakeTimers({ toFake: ['Date'] });
-  vi.setSystemTime(Date.now() + 120_001);
-  expect(store.take(fourth.actionReference, 'cancel', 42, 'sample-gym')).toBeNull();
-});

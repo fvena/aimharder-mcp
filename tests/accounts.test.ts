@@ -366,3 +366,16 @@ test('tokens issued before accounts existed keep working as the owner\'s', async
   expect((await accountContext(legacy)).structuredContent).toMatchObject({ defaults: { bookingPlan: [{ day: 'mon', className: 'CROSS' }] } });
   expect(whoami).toEqual([42]);
 });
+
+test('the owner edits a plan that starts from the environment, and the environment entries stay in it', async () => {
+  const cookie = await signIn(people.owner);
+  expect((await post('/settings/plan/add', { gym: 'sample-gym', day: 'tue', slot: 'tue|07:00|CROSS' }, cookie)).status).toBe(303);
+  const owner = await connect(people.owner);
+  const result = await accountContext(owner.accessToken!);
+  expect(result.structuredContent).toMatchObject({ defaults: { bookingPlan: [
+    { day: 'mon', className: 'CROSS', startTime: '07:00' }, { day: 'tue', className: 'CROSS', startTime: '07:00' },
+  ] } });
+  expect((await post('/settings/plan/remove', { gym: 'sample-gym', day: 'mon', startTime: '07:00', className: 'CROSS' }, cookie)).status).toBe(303);
+  const after = await accountContext((await connect(people.owner)).accessToken!);
+  expect(after.structuredContent).toMatchObject({ defaults: { bookingPlan: [{ day: 'tue', className: 'CROSS', startTime: '07:00' }] } });
+});

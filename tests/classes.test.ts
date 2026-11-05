@@ -282,3 +282,20 @@ test('reports the source coach name, or null when none is assigned', async () =>
   const result = await query(await connect());
   expect((result.structuredContent as { sessions: { coach: string | null }[] }).sessions.map(s => s.coach)).toEqual(['Sample Coach', null, null, null]);
 });
+
+test('a gym the account response gives no box for is reported as an invalid response, before any class request', async () => {
+  const { boid: _boid, ...withoutBox } = membership();
+  upstream.use(http.get('https://aimharder.es/api/whoami', () => HttpResponse.json({ data: [{ id: 42, roles: [withoutBox] }] })));
+  const client = await connect();
+  for (const [name, args] of [
+    ['get_class_sessions', { startDate: '2026-09-23', endDate: '2026-09-23' }],
+    ['get_upcoming_bookings', {}],
+    ['get_personal_activity', { startDate: '2026-09-23', endDate: '2026-09-23' }],
+    ['prepare_booking_creation', { date: '2026-09-23', className: 'Metcon', startTime: '07:00', endTime: '08:00' }],
+  ] as const) {
+    const result = await client.callTool({ name, arguments: args });
+    expect(result.isError).toBe(true);
+    expect(JSON.parse((result.content as { text: string }[])[0]!.text)).toMatchObject({ error: { code: 'INVALID_RESPONSE' } });
+  }
+  expect(classRequests()).toHaveLength(0);
+});

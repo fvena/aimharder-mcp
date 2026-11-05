@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { applySettings, gymSettingsSchema, userSettingsSchema, type Configuration, type GymSettings, type UserSettings } from './config.js';
+import { applySettings, gymSettingsSchema, userSettingsSchema, type BookingPlan, type Configuration, type Friends, type GymSettings, type ParticipantsFilterValue, type UserSettings } from './config.js';
 import { AimHarderError } from './errors.js';
 import { createContext, type Context } from './features/context.js';
 import { memberScope, type Member, type Store } from './store.js';
@@ -9,6 +9,15 @@ import { AimHarderUpstream } from './upstream.js';
 export const ownerSub = 'owner';
 const ownerScope = 'owner';
 const gymScope = 'gym';
+
+/** An account holder's own preferences as they apply now, to show and edit on the settings page. */
+export interface EditablePreferences {
+  defaultGym: string | undefined;
+  workoutClasses: Record<string, string>;
+  bookingPlans: Record<string, BookingPlan>;
+  participantsFilter: ParticipantsFilterValue;
+  friends: Friends;
+}
 
 export type SignInError = 'credentials' | 'not-invited' | 'unavailable';
 export type JoinError = 'invitation' | 'credentials' | 'unavailable' | 'owner' | 'no-gym';
@@ -40,16 +49,16 @@ export class Accounts {
   context(sub: string): Context | undefined {
     const cached = this.#contexts.get(sub);
     if (cached) return cached;
-    const config = this.configuration(sub);
+    const config = this.#configuration(sub);
     if (!config) return undefined;
     const context = createContext(config, this.settingsUrl);
     this.#contexts.set(sub, context);
     return context;
   }
 
-  configuration(sub: string): Configuration | undefined {
+  #configuration(sub: string): Configuration | undefined {
     const gym = this.gymSettings();
-    if (sub === ownerSub) return applySettings(this.base, gym, this.userSettings(sub));
+    if (sub === ownerSub) return applySettings(this.base, gym, this.#userSettings(sub));
     const id = memberId(sub);
     const credentials = id === undefined ? undefined : this.store.credentials(id);
     if (!credentials) return undefined;
@@ -57,7 +66,7 @@ export class Accounts {
     const base: Configuration = {
       ...this.base, ...credentials, defaultGym: undefined, bookingPlans: {}, friends: {}, participantsFilter: 'all', requireBookingConfirmation: true,
     };
-    return applySettings(base, gym, this.userSettings(sub));
+    return applySettings(base, gym, this.#userSettings(sub));
   }
 
   gymSettings(): GymSettings { return this.store.settings(gymScope, gymSettingsSchema, {}); }
@@ -72,16 +81,51 @@ export class Accounts {
     this.#contexts.clear();
   }
 
-  userSettings(sub: string): UserSettings {
-    const scope = settingsScope(sub);
-    return scope ? this.store.settings(scope, userSettingsSchema, {}) : {};
+  /** The account holder's own preferences as they apply now: the environment's (for the owner) under their own settings. */
+  preferences(sub: string): EditablePreferences | undefined {
+    const config = this.#configuration(sub);
+    if (!config) return undefined;
+    return {
+      defaultGym: config.defaultGym, workoutClasses: { ...config.workoutClasses }, bookingPlans: { ...config.bookingPlans },
+      participantsFilter: config.participantsFilter ?? 'all', friends: { ...config.friends },
+    };
   }
 
-  saveUserSettings(sub: string, settings: UserSettings) {
+  /**
+   * Change the account holder's own preferences. `change` receives them as they apply now and returns them changed.
+   * Only what changed becomes the account's own settings: a gym's workout class or plan, the friends, the filter or the
+   * default gym. Values left alone keep following the environment. Throws when a value is invalid; nothing is saved then.
+   */
+  updatePreferences(sub: string, change: (current: EditablePreferences) => EditablePreferences) {
     const scope = settingsScope(sub);
-    if (!scope) return;
-    this.store.saveSettings(scope, userSettingsSchema.parse(settings));
+    const current = this.preferences(sub);
+    if (!scope || !current) return;
+    const next = change(structuredClone(current));
+    const own = this.#userSettings(sub);
+    const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+    const perGym = <T>(stored: Record<string, T> | undefined, before: Record<string, T>, after: Record<string, T>) => {
+      const result = { ...stored };
+      for (const gymId of new Set([...Object.keys(before), ...Object.keys(after)])) {
+        if (same(before[gymId], after[gymId])) continue;
+        if (Object.hasOwn(after, gymId)) result[gymId] = after[gymId]!; else delete result[gymId];
+      }
+      return result;
+    };
+    const settings: UserSettings = userSettingsSchema.parse({
+      ...own,
+      workoutClasses: perGym(own.workoutClasses, current.workoutClasses, next.workoutClasses),
+      bookingPlans: perGym(own.bookingPlans, current.bookingPlans, next.bookingPlans),
+      ...(same(current.friends, next.friends) ? {} : { friends: next.friends }),
+      ...(current.participantsFilter === next.participantsFilter ? {} : { participantsFilter: next.participantsFilter }),
+      ...(current.defaultGym === next.defaultGym || next.defaultGym === undefined ? {} : { defaultGym: next.defaultGym }),
+    });
+    this.store.saveSettings(scope, settings);
     this.#contexts.delete(sub);
+  }
+
+  #userSettings(sub: string): UserSettings {
+    const scope = settingsScope(sub);
+    return scope ? this.store.settings(scope, userSettingsSchema, {}) : {};
   }
 
   /** Sign in with an AimHarder account: the owner's configured one, or a member's, verified with AimHarder. */

@@ -13,7 +13,8 @@ import { readResponse } from './http.js';
 export interface Gym {
   id: string;
   name: string;
-  timeZone: string | null;
+  /** The configured IANA zone, or Europe/Madrid assumed. */
+  timeZone: string;
   timeZoneStatus: 'assumed' | 'user-confirmed';
 }
 export interface AccessibleGym { gym: Gym; boxId: number | undefined }
@@ -48,6 +49,12 @@ export interface GymSession {
   /** The box publisher user ID for workouts: from the app login, or from the gym page when the app does not list the box. */
   publisher(): Promise<number>;
 }
+/** A gym session whose gym has a box ID: what class, booking and activity queries need. */
+export interface BoxSession extends GymSession { boxId: number }
+/** A box session whose time zone the account holder confirmed: what every write preview needs. */
+export interface ConfirmedSession extends BoxSession { gym: Gym & { timeZoneStatus: 'user-confirmed' } }
+/** What a query needs from its gym; an unmet requirement fails before any query request. */
+export type GymRequirement = 'box' | 'confirmed-zone';
 
 const loginUrl = 'https://login.aimharder.es/api/login';
 const identityUrl = 'https://aimharder.es/api/whoami';
@@ -81,10 +88,20 @@ export class AimHarderUpstream {
 
   /**
    * Run one query for the selected gym (`gymId`, else the configured default, else the only gym).
+   * A requirement is checked before `work` runs: `box` needs the gym's box ID (else INVALID_RESPONSE), `confirmed-zone`
+   * also needs a user-confirmed time zone (else CONFIRMED_GYM_TIME_ZONE_REQUIRED).
    * Queries are serialized so a session renewal cannot replace another query's session.
    */
-  withGym<T>(gymId: string | undefined, work: (session: GymSession) => Promise<T>): Promise<T> {
-    return this.#enqueue(() => this.#run(gymId, work, true));
+  withGym<T>(gymId: string | undefined, work: (session: GymSession) => Promise<T>): Promise<T>;
+  withGym<T>(gymId: string | undefined, requirement: 'box', work: (session: BoxSession) => Promise<T>): Promise<T>;
+  withGym<T>(gymId: string | undefined, requirement: 'confirmed-zone', work: (session: ConfirmedSession) => Promise<T>): Promise<T>;
+  withGym<T>(gymId: string | undefined, ...args: [(session: GymSession) => Promise<T>] | [GymRequirement, (session: never) => Promise<T>]): Promise<T> {
+    const [requirement, work] = args.length === 1 ? [undefined, args[0]] : args;
+    return this.#enqueue(() => this.#run(gymId, (session) => {
+      if (requirement === 'confirmed-zone' && session.gym.timeZoneStatus !== 'user-confirmed') throw new AimHarderError('CONFIRMED_GYM_TIME_ZONE_REQUIRED');
+      if (requirement !== undefined && session.boxId === undefined) throw new AimHarderError('INVALID_RESPONSE');
+      return (work as (session: GymSession) => Promise<T>)(session);
+    }, true));
   }
 
   /**

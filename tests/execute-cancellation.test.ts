@@ -263,3 +263,16 @@ test('a repeated late warning remains uncertain rather than being called a denia
   expect(result.structuredContent).not.toHaveProperty('actionReference');
   expect(writes).toHaveLength(2);
 });
+
+test('a cancellation reference executes only a cancellation, and only once', async () => {
+  const client = await connect();
+  const reference = await prepare(client);
+  const asBooking = await client.callTool({ name: 'execute_booking_creation', arguments: { actionReference: reference, confirmed: true } });
+  expect(asBooking.isError).toBe(true);
+  expect(JSON.stringify(asBooking)).toContain('BOOKING_REFERENCE_INVALID');
+  const asLate = await executeLate(client, await prepare(client));
+  expect(JSON.stringify(asLate)).toContain('BOOKING_REFERENCE_INVALID');
+  // Any execution attempt uses the reference up.
+  expect(JSON.stringify(await execute(client, reference))).toContain('BOOKING_REFERENCE_INVALID');
+  expect(writes).toHaveLength(0);
+});
