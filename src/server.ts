@@ -79,12 +79,13 @@ function buildServer(ctx: Context) {
     annotations: readOnly,
   }, (query) => respond(() => schedule.getClassSessions(ctx, query)));
   server.registerTool('get_class_participants', {
-    description: 'List who is booked into one exact class session (gym-local date, exact class name and HH:mm start time), as the AimHarder app shows it. Returns the session occupancy, capacity and coach, and each participant\'s user ID and name. Names are other members\' personal data: use them only to answer the account holder. The list can change until the class starts.',
+    description: 'List who is booked into one exact class session (gym-local date, exact class name and HH:mm start time), as the AimHarder app shows it. Returns the session occupancy, capacity and coach, and each participant\'s user ID and name. Optional filter: all, or following (only athletes the account follows in AimHarder; the default comes from configuration). The result reports the filter and totalParticipants. Names are other members\' personal data: use them only to answer the account holder. The list can change until the class starts.',
     inputSchema: participantsQuerySchema,
     outputSchema: z.object({
       gym: gymSchema, target: z.object({ date: dateSchema, className: z.string(), startTime: z.string() }),
       status: z.enum(['available', 'missing', 'ambiguous']),
       session: z.object({ sessionId: z.string(), timeLabel: z.string(), occupancy: z.number().nullable(), capacity: z.number().nullable(), coach: z.string().nullable() }).nullable(),
+      filter: z.enum(['all', 'following']).optional(), totalParticipants: z.number().int().nonnegative().optional(),
       participants: z.array(participantSchema), notices: z.array(z.string()),
     }),
     annotations: readOnly,

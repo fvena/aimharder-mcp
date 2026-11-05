@@ -222,3 +222,58 @@ describe('deleting an own activity', () => {
     expect(deletions()).toHaveLength(1);
   });
 });
+
+describe('filtering participants to followed athletes', () => {
+  const participantsArgs = { date: '2026-11-05', className: 'CROSS', startTime: '14:00' };
+  beforeEach(() => {
+    upstream.use(http.get(`${app}/user/list`, ({ request }) => {
+      const params = new URL(request.url).searchParams;
+      expect([params.get('type'), params.get('relId'), params.get('token')]).toEqual(['1', '42', issuedToken]);
+      // Page 0: the gym account and one athlete; page 1 ends the list.
+      return HttpResponse.json(params.get('page') === '0'
+        ? { type: 1, relId: '42', users: [{ id: 300, isBox: 1, name: 'Sample Gym' }, { id: 77, isBox: 0, name: 'Training Partner' }] }
+        : { type: 1, relId: '42', users: [] });
+    }));
+  });
+  type Filtered = Participants & { filter: string; totalParticipants: number; notices: string[] };
+
+  test('returns only followed athletes, reading every page and ignoring gym accounts', async () => {
+    const result = await (await connect()).callTool({ name: 'get_class_participants', arguments: { ...participantsArgs, filter: 'following' } });
+    expect(result.isError).not.toBe(true);
+    const content = result.structuredContent as Filtered;
+    expect(content).toMatchObject({ status: 'available', filter: 'following', totalParticipants: 2 });
+    expect(content.participants.map(p => p.userId)).toEqual([77]);
+    expect(appCalls('user/list').map(r => r.url.searchParams.get('page'))).toEqual(['0', '1']);
+    expect(content.notices.join(' ')).toContain('1 of 2 participants');
+  });
+
+  test('uses the configured default, and an explicit filter overrides it', async () => {
+    const client = await connect({ AIMHARDER_PARTICIPANTS_FILTER: 'following' });
+    const byDefault = await client.callTool({ name: 'get_class_participants', arguments: participantsArgs });
+    expect((byDefault.structuredContent as Filtered).participants.map(p => p.userId)).toEqual([77]);
+    const calls = appCalls('user/list').length;
+    const everyone = await client.callTool({ name: 'get_class_participants', arguments: { ...participantsArgs, filter: 'all' } });
+    expect(everyone.structuredContent).toMatchObject({ filter: 'all', totalParticipants: 2 });
+    expect((everyone.structuredContent as Filtered).participants).toHaveLength(2);
+    expect(appCalls('user/list')).toHaveLength(calls);
+  });
+
+  test('without configuration lists everyone and does not read the followed list', async () => {
+    const result = await (await connect()).callTool({ name: 'get_class_participants', arguments: participantsArgs });
+    expect(result.structuredContent).toMatchObject({ filter: 'all', totalParticipants: 2 });
+    expect(appCalls('user/list')).toHaveLength(0);
+  });
+
+  test('a malformed followed list is an error, not an empty result', async () => {
+    upstream.use(http.get(`${app}/user/list`, () => HttpResponse.json({ type: 1, people: [] })));
+    const result = await (await connect()).callTool({ name: 'get_class_participants', arguments: { ...participantsArgs, filter: 'following' } });
+    expect(result.isError).toBe(true);
+    expect(JSON.stringify(result)).toContain('INVALID_FOLLOWING_RESPONSE');
+  });
+
+  test('rejects an invalid filter value and configuration', async () => {
+    const result = await (await connect()).callTool({ name: 'get_class_participants', arguments: { ...participantsArgs, filter: 'friends' } });
+    expect(result.isError).toBe(true);
+    await expect(connect({ AIMHARDER_PARTICIPANTS_FILTER: 'friends' })).rejects.toMatchObject({ code: 'INVALID_PARTICIPANTS_FILTER_CONFIGURATION' });
+  });
+});

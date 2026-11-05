@@ -13,6 +13,8 @@ const messages = {
   INVALID_EXERCISE_RESULT_DELETION_QUERY: 'Supply a gym-local date and an own activity ID, with an optional accessible gym ID.',
   EXERCISE_RESULT_REFERENCE_INVALID: 'The exercise-result reference is expired, already used, or does not match this account and gym. Prepare a new preview.',
   INVALID_PARTICIPANTS_QUERY: 'Supply one exact class name, gym-local date and HH:mm start time, with an optional accessible gym ID.',
+  INVALID_PARTICIPANTS_FILTER_CONFIGURATION: 'AIMHARDER_PARTICIPANTS_FILTER must be all or following.',
+  INVALID_FOLLOWING_RESPONSE: 'AimHarder returned an unsupported list of followed accounts.',
   INVALID_PARTICIPANTS_RESPONSE: 'AimHarder returned an unsupported or inconsistent participant list.',
   INVALID_ACTIVITY_QUERY: 'Supply valid inclusive gym-local dates spanning at most 31 calendar dates.',
   INVALID_ACTIVITY_RESPONSE: 'AimHarder returned unsupported or inconsistent personal activity data.',

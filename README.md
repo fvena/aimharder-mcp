@@ -49,7 +49,7 @@ Deploy your own instance (the [Dockerfile](Dockerfile) works on Fly.io, Render, 
 | --- | --- |
 | `get_account_context` | Which gyms can I query? |
 | `get_class_sessions` | Which CROSS classes are there this week, and when does booking open? |
-| `get_class_participants` | Who is coming to today's 14:00 CROSS? |
+| `get_class_participants` | Who is coming to today's 14:00 CROSS? Which of my friends? |
 | `prepare_booking_creation` / `execute_booking_creation` | Book next Monday's 14:00 CROSS. |
 | `prepare_booking_cancellation` / `execute_booking_cancellation` | Cancel Wednesday's class. |
 | `execute_late_booking_cancellation` | Cancel inside the late window, accepting a possible credit loss. |

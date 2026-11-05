@@ -1,6 +1,7 @@
 import { AimHarderError } from '../errors.js';
 import { type Gym } from '../upstream.js';
-import { parseParticipants, participantsQuerySchema, type ParticipantsQuery } from '../domain/participants.js';
+import { parseFollowingPage, parseParticipants, participantsQuerySchema, type ParticipantsQuery } from '../domain/participants.js';
+import { type GymSession } from '../upstream.js';
 import { calendarDates, classQuerySchema, parseClassDay, type ClassQuery, type ClassSession } from '../domain/classes.js';
 import { bookingWindow } from '../domain/booking-preparation.js';
 import { gymRule, type Context } from './context.js';
@@ -61,12 +62,27 @@ export function getClassParticipants(ctx: Context, input: ParticipantsQuery) {
     if (sessions.length !== 1) return { ...base, status: sessions.length ? 'ambiguous' as const : 'missing' as const, session: null, participants: [],
       notices: [sessions.length ? 'Several sessions match this class name and start time; no participant list was requested.' : 'No session with this exact class name and start time was found in the daily schedule.'] };
     const classSession = sessions[0]!;
-    const participants = parseParticipants(await session.read({ kind: 'participants', boxId, date: query.date, sessionId: classSession.sourceId }));
-    return { ...base, status: 'available' as const,
+    const all = parseParticipants(await session.read({ kind: 'participants', boxId, date: query.date, sessionId: classSession.sourceId }));
+    const filter = query.filter ?? ctx.config.participantsFilter ?? 'all';
+    const followed = filter === 'following' && all.length ? await followedAthletes(session) : new Set<number>();
+    const participants = filter === 'following' ? all.filter(participant => followed.has(participant.userId)) : all;
+    return { ...base, status: 'available' as const, filter, totalParticipants: all.length,
       session: { sessionId: classSession.sessionId, timeLabel: classSession.timeLabel, occupancy: classSession.occupancy, capacity: classSession.capacity, coach: classSession.coach },
       participants, notices: [
         'Participants come from the AimHarder app API for this exact session. The list can change until the class starts; sourceState is a raw value whose meaning is unverified.',
+        ...(filter === 'following' ? [`Filtered to athletes the account follows in AimHarder: ${participants.length} of ${all.length} participants. Follow or unfollow athletes in the AimHarder app to change this list.`] : []),
         privacy,
       ] };
   });
+}
+
+/** User IDs of the athletes the account follows, across every page of the followed list. */
+async function followedAthletes(session: GymSession) {
+  const ids = new Set<number>();
+  for (let page = 0; page < 20; page++) {
+    const { size, athleteIds } = parseFollowingPage(await session.read({ kind: 'following', page }));
+    athleteIds.forEach(id => ids.add(id));
+    if (size === 0) return ids;
+  }
+  throw new AimHarderError('INVALID_FOLLOWING_RESPONSE');
 }

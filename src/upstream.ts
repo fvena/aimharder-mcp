@@ -22,6 +22,7 @@ export interface AccessibleGym { gym: Gym; boxId: number | undefined }
 export type ReadOperation =
   | { kind: 'schedule'; boxId: number; date: string }
   | { kind: 'participants'; boxId: number; date: string; sessionId: number }
+  | { kind: 'following'; page: number }
   | { kind: 'upcoming'; boxId: number }
   | { kind: 'day-workouts'; publisher: number; date: string }
   | { kind: 'workout'; id: number }
@@ -158,6 +159,7 @@ export class AimHarderUpstream {
     switch (operation.kind) {
       case 'schedule': return this.#appRequest('bookings', { query: { day: day(operation.date), box: String(operation.boxId), familyId: '', showClasesDisp: '0', appVer: appIdentity.versionApp } });
       case 'participants': return this.#appRequest('classAthleteBookings', { query: { hcid: String(operation.sessionId), day: day(operation.date), box: String(operation.boxId) } });
+      case 'following': return this.#appRequest('user/list', { query: { type: '1', relId: String(this.#accountId), page: String(operation.page) } });
       case 'upcoming': return this.#appRequest('nextBookings', { query: { box: String(operation.boxId) } });
       case 'day-workouts': return this.#appRequest('bookingwod', { query: {
         timeLineFormat: '0', timeLineContent: '7', userID: String(operation.publisher), filterDay: day(operation.date), filterWODs: '', appVer: appIdentity.versionApp,
