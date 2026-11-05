@@ -3,8 +3,11 @@ import { dateSchema, timeSchema } from './classes.js';
 import { gymIdSchema } from '../config.js';
 import { AimHarderError } from '../errors.js';
 
+export const participantsFilterSchema = z.enum(['all', 'following']);
+export type ParticipantsFilter = z.infer<typeof participantsFilterSchema>;
 export const participantsQuerySchema = z.object({
   date: dateSchema, className: z.string().trim().min(1).max(300), startTime: timeSchema, gymId: gymIdSchema.optional(),
+  filter: participantsFilterSchema.optional().describe('all: every participant; following: only athletes the account follows in AimHarder. Defaults to AIMHARDER_PARTICIPANTS_FILTER, else all.'),
 }).strict();
 export type ParticipantsQuery = z.infer<typeof participantsQuerySchema>;
 
@@ -29,4 +32,17 @@ export function parseParticipants(body: unknown) {
     throw new AimHarderError('INVALID_PARTICIPANTS_RESPONSE');
   }
   return parsed.data.athletes.map(row => ({ userId: row.usid, name: row.name, sourceState: row.state ?? null }));
+}
+
+// App `user/list?type=1`: accounts the user follows. Gym accounts (`isBox`) are not athletes.
+const followingSchema = z.object({
+  type: z.union([z.literal(1), z.literal('1')]),
+  users: z.array(z.object({ id: z.number().int().positive().safe(), isBox: z.union([z.literal(0), z.literal(1)]).nullish() })).max(500),
+});
+
+/** User IDs of the followed athletes on one page; an empty page ends the list. */
+export function parseFollowingPage(body: unknown) {
+  const parsed = followingSchema.safeParse(body);
+  if (!parsed.success) throw new AimHarderError('INVALID_FOLLOWING_RESPONSE');
+  return { size: parsed.data.users.length, athleteIds: parsed.data.users.filter(user => user.isBox !== 1).map(user => user.id) };
 }

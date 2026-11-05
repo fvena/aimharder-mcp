@@ -18,8 +18,9 @@ const environmentSchema = z.object({
   AIMHARDER_BOOKING_WINDOW_DAYS: z.string().optional(),
   AIMHARDER_CANCELLATION_WINDOW_MINUTES: z.string().optional(),
   AIMHARDER_REQUIRE_BOOKING_CONFIRMATION: z.enum(['true', 'false']).optional(),
+  AIMHARDER_PARTICIPANTS_FILTER: z.string().optional(),
 });
-export type Configuration = Omit<ReturnType<typeof readConfiguration>, 'requireBookingConfirmation' | 'bookingWindowDays' | 'cancellationWindowMinutes'> & { requireBookingConfirmation?: boolean; bookingWindowDays?: Record<string, number>; cancellationWindowMinutes?: Record<string, number> };
+export type Configuration = Omit<ReturnType<typeof readConfiguration>, 'requireBookingConfirmation' | 'bookingWindowDays' | 'cancellationWindowMinutes' | 'participantsFilter'> & { requireBookingConfirmation?: boolean; bookingWindowDays?: Record<string, number>; cancellationWindowMinutes?: Record<string, number>; participantsFilter?: 'all' | 'following' };
 
 export function readConfiguration(environment: Record<string, string | undefined>) {
   const parsed = environmentSchema.safeParse(environment);
@@ -42,10 +43,14 @@ export function readConfiguration(environment: Record<string, string | undefined
       cancellationWindowMinutes = cancellationWindowsSchema.parse(JSON.parse(parsed.data.AIMHARDER_CANCELLATION_WINDOW_MINUTES));
     }
   } catch { throw new AimHarderError('INVALID_CANCELLATION_WINDOW_CONFIGURATION'); }
+  const filterValue = parsed.data.AIMHARDER_PARTICIPANTS_FILTER ?? 'all';
+  if (filterValue !== 'all' && filterValue !== 'following') throw new AimHarderError('INVALID_PARTICIPANTS_FILTER_CONFIGURATION');
+  const filter: 'all' | 'following' = filterValue;
   return {
     gymTimeZones,
     bookingWindowDays,
     cancellationWindowMinutes,
+    participantsFilter: filter,
     requireBookingConfirmation: parsed.data.AIMHARDER_REQUIRE_BOOKING_CONFIRMATION !== 'false',
     username: parsed.data.AIMHARDER_USERNAME,
     password: parsed.data.AIMHARDER_PASSWORD,

@@ -13,6 +13,7 @@ The server serves one AimHarder account, locally over stdio (default) or remotel
 | `AIMHARDER_BOOKING_WINDOW_DAYS` | no | JSON object from gym ID to days (1–60). Booking opens that many days before the class, at the same gym-local time. Sessions then report `bookingOpensAt`/`bookingOpen`, and booking previews return `not-yet-open` before that time. |
 | `AIMHARDER_CANCELLATION_WINDOW_MINUTES` | no | JSON object from gym ID to minutes (1–10080). Cancelling within that many minutes of the class may lose a credit. Cancellation previews warn inside the window, and a preview prepared before the window opened becomes `stale`. |
 | `AIMHARDER_REQUIRE_BOOKING_CONFIRMATION` | no | `true` (default) or `false`. With `false`, an explicit request to book an exact class is enough to execute its preview. Cancellations and saving or deleting results always require confirmation. |
+| `AIMHARDER_PARTICIPANTS_FILTER` | no | `all` (default) or `following`. Default for `get_class_participants`: everyone in the class, or only the athletes you follow in AimHarder. Each call can still choose with `filter`. Follow or unfollow athletes in the AimHarder app. |
 
 ### Remote (HTTP) transport
 
