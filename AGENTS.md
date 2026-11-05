@@ -26,4 +26,4 @@ A TypeScript MCP server for one AimHarder account, run locally over stdio or dep
 
 Run `npm run check` (typecheck, tests and build) before committing. Tests must not reach the real service. A live check against a real account is read-only unless the account holder explicitly confirms the exact write.
 
-Keep `README.md`, `docs/configuration.md`, `docs/remote.md`, `docs/tools.md` and `docs/aimharder-api.md` in sync with any change to tools, configuration or upstream behavior.
+Keep `README.md`, `docs/configuration.md`, `docs/remote.md`, `docs/setup-guide.md`, `docs/tools.md` and `docs/aimharder-api.md` in sync with any change to tools, configuration or upstream behavior.

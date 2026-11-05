@@ -42,6 +42,8 @@ The first tool call signs in. Use `get_account_context` to see your gym IDs and 
 
 ## Use it from Claude or ChatGPT on the web and mobile
 
+**New to this?** Follow the [step-by-step setup guide](docs/setup-guide.md): no programming knowledge needed.
+
 Deploy your own instance (the [Dockerfile](Dockerfile) works on Fly.io, Render, Railway and similar platforms, or on your computer behind a tunnel) with `MCP_TRANSPORT=http`, `MCP_PUBLIC_URL` and an `MCP_OWNER_SECRET`. Then add `https://<your-host>/mcp` as a custom connector in Claude or as an app in ChatGPT developer mode, and approve it with your owner secret. Each person runs an instance for their own account; credentials stay in their own platform secrets. See [remote use](docs/remote.md).
 
 ## Tools

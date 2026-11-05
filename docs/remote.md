@@ -2,6 +2,8 @@
 
 Claude and ChatGPT on the web, desktop and mobile can't start a local process. They connect from their own cloud to a **remote MCP server**: a public HTTPS URL. In HTTP mode this server provides one for your account.
 
+For a beginner-friendly walkthrough, see the [step-by-step setup guide](setup-guide.md). This page is the technical reference.
+
 Each person runs their **own instance** for their own account. The instance keeps your AimHarder credentials in your hosting platform's secrets. Nobody else, including the project's authors, sees or stores them.
 
 ## How it works
