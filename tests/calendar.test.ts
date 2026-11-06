@@ -288,7 +288,6 @@ test('the calendar section and link wait until an account with several gyms choo
   expect(await (await get(path)).text()).toContain('LOCATION:Box Norte\\, Sala 1');
   // The link belongs to the account: after choosing another gym it lists that gym's bookings.
   await post('/settings/gym', { gym: 'other-gym' }, cookie);
-  await restart();
   expect(await (await get(path)).text()).toContain('LOCATION:Otro box');
   // A chosen gym that is no longer the account's is an error, never an empty calendar.
   roles = [gym];

@@ -45,15 +45,16 @@ export const calendarCacheSeconds = 300;
 
 /**
  * Each account's calendar feed, read from AimHarder at most every `calendarCacheSeconds`. Concurrent requests share one
- * read, and a failed read is not kept, so the next request reads again.
+ * read, and a failed read is not kept, so the next request reads again. A changed context (its settings changed, for
+ * example its gym) reads again at once.
  */
 export class CalendarFeeds {
-  readonly #feeds = new Map<string, { at: number; feed: Promise<Feed> }>();
+  readonly #feeds = new Map<string, { at: number; ctx: Context; feed: Promise<Feed> }>();
 
   read(sub: string, ctx: Context): Promise<Feed> {
     let cached = this.#feeds.get(sub);
-    if (!cached || Date.now() - cached.at >= calendarCacheSeconds * 1000) {
-      const entry = { at: Date.now(), feed: upcomingBookingsCalendar(ctx) };
+    if (!cached || cached.ctx !== ctx || Date.now() - cached.at >= calendarCacheSeconds * 1000) {
+      const entry = { at: Date.now(), ctx, feed: upcomingBookingsCalendar(ctx) };
       this.#feeds.set(sub, entry);
       entry.feed.catch(() => { if (this.#feeds.get(sub) === entry) this.#feeds.delete(sub); });
       cached = entry;

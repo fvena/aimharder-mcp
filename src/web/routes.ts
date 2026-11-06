@@ -286,7 +286,7 @@ ${signInForm({ action: `/invite/${encodeURIComponent(token)}`, submit: 'Aceptar 
     const gone = config.gym !== undefined && !gym;
     const choice = gyms.length > 1 || gone ? `<form method="post" action="/settings/gym"><label for="gym">Gimnasio</label><select id="gym" name="gym">
 ${gym ? '' : '<option value="" selected disabled>Elige tu gimnasio</option>'}${gyms.map((entry) => `<option value="${e(entry.id)}"${gym?.id === entry.id ? ' selected' : ''}>${e(entry.name)}</option>`).join('')}</select>
-<p class="hint">${gym ? 'Si cambias de gimnasio se borran el resto de tus ajustes (zona horaria, márgenes, plan, clase de entreno, filtro y amigos), porque son del gimnasio anterior.' : 'Tu cuenta de AimHarder tiene varios. El asistente usa solo el que elijas.'}</p>
+<p class="hint">${gym ? 'Si cambias de gimnasio se borran el resto de tus ajustes (zona horaria, márgenes, plan, clase de entreno, filtro y amigos), porque son del gimnasio anterior, y las reservas vuelven a pedir confirmación.' : 'Tu cuenta de AimHarder tiene varios. El asistente usa solo el que elijas.'}</p>
 <div class="btn-row"><button type="submit"${gym ? '' : ' class="primary"'}>${gym ? 'Cambiar de gimnasio' : 'Elegir gimnasio'}</button></div></form>` : '';
     if (!gym) {
       layout(res, 200, 'Ajustes', 'settings', `<h1>Ajustes</h1><section id="gimnasio"><h2>Tu gimnasio</h2>${notice(req, 'gimnasio')}

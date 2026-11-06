@@ -50,8 +50,8 @@ export class Store {
   /**
    * Version 3: each account uses one gym and keeps its rules itself. Each account's settings keep what applied at its gym
    * (its default gym, else the only gym the server used or the stored settings name): the shared gym rules (time zone,
-   * booking and cancellation windows) and its own workout class and plan there. Only a default gym is kept as the chosen
-   * one. The shared gym rules and active gyms are dropped. From version 1, whose booking plan, friends and participant
+   * booking and cancellation windows) and its own workout class and plan there. Its default gym, else the only gym the server
+   * used, is kept as the chosen one. The shared gym rules and active gyms are dropped. From version 1, whose booking plan, friends and participant
    * filter formats version 2 changed, personal settings start over first.
    */
   #migrateToOneGym(fromVersion1: boolean) {
@@ -71,11 +71,13 @@ export class Store {
         const keyed = [own.workoutClasses, own.bookingPlans, rules.gymTimeZones, rules.bookingWindowDays, rules.cancellationWindowMinutes].map(record);
         const named = new Set(keyed.flatMap((values) => Object.keys(values)));
         const active = Array.isArray(rules.activeGyms) ? rules.activeGyms : [];
-        const gym = typeof own.defaultGym === 'string' ? own.defaultGym
-          : active.length === 1 ? active[0] : named.size === 1 ? [...named][0] : undefined;
+        // The gym the account used: its default, else the only one the server used. Without either, the account had one gym
+        // (else it needed a default), so the only gym its settings name is the one its values apply to.
+        const chosen = typeof own.defaultGym === 'string' ? own.defaultGym : active.length === 1 ? active[0] : undefined;
+        const gym = chosen ?? (named.size === 1 ? [...named][0] : undefined);
         const at = (values: Record<string, unknown>) => (typeof gym === 'string' && Object.hasOwn(values, gym) ? values[gym] : undefined);
         const [workoutClass, bookingPlan, timeZone, bookingWindowDays, cancellationWindowMinutes] = keyed.map(at);
-        const candidate = { gym: own.defaultGym, timeZone, bookingWindowDays, cancellationWindowMinutes, workoutClass, bookingPlan, participantsFilter: own.participantsFilter, friends: own.friends };
+        const candidate = { gym: chosen, timeZone, bookingWindowDays, cancellationWindowMinutes, workoutClass, bookingPlan, participantsFilter: own.participantsFilter, friends: own.friends };
         // Keep each value that is still valid on its own.
         const next = Object.fromEntries(Object.entries(candidate).filter(([key, value]) => value !== undefined && userSettingsSchema.safeParse({ [key]: value }).success));
         if (Object.keys(next).length) this.saveSettings(scope, userSettingsSchema.parse(next));

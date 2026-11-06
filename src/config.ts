@@ -80,7 +80,7 @@ export interface Configuration {
   timeZone?: string | undefined;
   bookingWindowDays?: number | undefined;
   cancellationWindowMinutes?: number | undefined;
-  workoutClass?: string | null | undefined;
+  workoutClass?: string | undefined;
   bookingPlan?: BookingPlan | undefined;
   participantsFilter?: ParticipantsFilterValue | undefined;
   friends?: Friends | undefined;
@@ -142,7 +142,7 @@ export type UserSettings = z.infer<typeof userSettingsSchema>;
  * The settings of an account that has just chosen another gym: every other setting cleared, the environment's included,
  * because they all refer to the previous gym. A setting added to `userSettingsSchema` belongs here too.
  */
-export const newGymSettings = (gym: string): UserSettings => ({
+export const newGymSettings = (gym: string): Required<UserSettings> => ({
   gym, timeZone: null, bookingWindowDays: null, cancellationWindowMinutes: null, workoutClass: null, bookingPlan: [],
   participantsFilter: 'all', friends: {}, requireBookingConfirmation: true,
 });
