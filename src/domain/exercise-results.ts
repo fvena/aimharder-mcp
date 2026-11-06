@@ -1,6 +1,5 @@
 import { z } from 'zod';
 import { dateSchema } from './classes.js';
-import { gymIdSchema } from '../config.js';
 import { exerciseIdSchema } from './exercise-records.js';
 
 // Recording a strength result (sets × repetitions at a load), as the AimHarder app does it.
@@ -12,13 +11,11 @@ export const exerciseResultQuerySchema = z.object({
   sets: z.number().int().min(1).max(20),
   reps: z.number().int().min(1).max(100).describe('Repetitions per set.'),
   loadKg: loadSchema.describe('Load actually lifted, in kilograms.'),
-  gymId: gymIdSchema.optional(),
 }).strict();
 export type ExerciseResultQuery = z.infer<typeof exerciseResultQuerySchema>;
 export const exerciseResultExecutionSchema = z.object({
   actionReference: z.string().regex(/^[0-9a-f]{64}$/),
   confirmed: z.literal(true).optional().describe('Set only after the account holder confirmed this exact preview.'),
-  gymId: gymIdSchema.optional(),
 }).strict();
 export type ExerciseResultExecution = z.infer<typeof exerciseResultExecutionSchema>;
 
@@ -74,7 +71,6 @@ export function parseSaveResponse(text: unknown): { status: 'saved'; activityId:
 export const exerciseResultDeletionQuerySchema = z.object({
   date: dateSchema.describe('Gym-local date of the activity.'),
   activityId: z.number().int().positive().safe().describe('Own activity ID, for example from get_personal_activity or execute_exercise_result.'),
-  gymId: gymIdSchema.optional(),
 }).strict();
 export type ExerciseResultDeletionQuery = z.infer<typeof exerciseResultDeletionQuerySchema>;
 export const exerciseResultDeletionExecutionSchema = exerciseResultExecutionSchema;

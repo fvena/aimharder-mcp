@@ -40,7 +40,7 @@ afterAll(() => upstream.close());
 async function connect(extra: Record<string, string | undefined> = {}) {
   const server = createServer({
     AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic-password',
-    AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid"}', ...extra,
+    AIMHARDER_TIME_ZONE: 'Europe/Madrid', ...extra,
   });
   const client = new Client({ name: 'booking-behavioral-harness', version: '1.0.0' });
   const [a, b] = InMemoryTransport.createLinkedPair();
@@ -327,7 +327,7 @@ test('detail failure is failed retrieval, not unpublished', async () => {
  expect((await query(await connect())).isError).toBe(true);
 });
 test('uses an assumed zone and rejects arbitrary publisher selection', async () => {
- expect((await query(await connect({ AIMHARDER_GYM_TIME_ZONES: undefined }))).structuredContent).toMatchObject({ gym: { timeZone: 'Europe/Madrid', timeZoneStatus: 'assumed' } });
+ expect((await query(await connect({ AIMHARDER_TIME_ZONE: undefined }))).structuredContent).toMatchObject({ gym: { timeZone: 'Europe/Madrid', timeZoneStatus: 'assumed' } });
  expect((await query(await connect(), { userID: 77 })).isError).toBe(true);
  expect(requests.filter(r => r.url.pathname === '/aplic/apiExternal/bookingwod')).toHaveLength(1);
 });
@@ -477,7 +477,7 @@ test('all operations remain the selected gym read-only allowlist', async () => {
   expect(['/api/login', '/api/whoami', '/aplic/apiExternal/login', '/aplic/apiExternal/bookingwod', '/aplic/apiExternal/activity/workout']).toContain(r.url.pathname);
  }
 });
-test('routes override only to another verified gym and preserves its configured zone', async () => {
+test('routes only to the chosen verified gym and preserves its configured zone', async () => {
  upstream.use(
   http.get('https://aimharder.es/api/whoami', () => HttpResponse.json({ data: [{ id: 42, roles: [membership(), membership('other-gym', 201)] }] })),
   http.get('https://other-gym.aimharder.es/', () => HttpResponse.text('timeLineContent: 7, userID: 301')),
@@ -486,8 +486,8 @@ test('routes override only to another verified gym and preserves its configured 
   }),
   http.get(`${appBase}/activity/workout`, () => HttpResponse.json(detail())),
  );
- const client = await connect({ AIMHARDER_DEFAULT_GYM: 'sample-gym', AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid","other-gym":"Atlantic/Canary"}' });
- expect((await query(client, { gymId: 'other-gym' })).structuredContent).toMatchObject({ gym: { id: 'other-gym' }, workouts: [{ timeZone: 'Atlantic/Canary' }] });
- expect((await query(client, { gymId: 'foreign-gym' })).isError).toBe(true);
+ const client = await connect({ AIMHARDER_GYM: 'other-gym', AIMHARDER_TIME_ZONE: 'Atlantic/Canary' });
+ expect((await query(client)).structuredContent).toMatchObject({ gym: { id: 'other-gym' }, workouts: [{ timeZone: 'Atlantic/Canary' }] });
+ expect((await query(await connect({ AIMHARDER_GYM: 'foreign-gym' }))).isError).toBe(true);
  expect(requests.filter(r => r.url.hostname === 'foreign-gym.aimharder.es')).toHaveLength(0);
 });

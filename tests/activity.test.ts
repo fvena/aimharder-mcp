@@ -34,7 +34,7 @@ afterAll(() => upstream.close());
 async function connect(extra: Record<string, string | undefined> = {}) {
   const server = createServer({
     AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic-password',
-    AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid"}', ...extra,
+    AIMHARDER_TIME_ZONE: 'Europe/Madrid', ...extra,
   });
   const client = new Client({ name: 'booking-behavioral-harness', version: '1.0.0' });
   const [a, b] = InMemoryTransport.createLinkedPair();
@@ -160,7 +160,7 @@ test('rejects record-date mismatch instead of using publication timing',async()=
  expect((await query(await connect())).structuredContent).toMatchObject({entries:[],coverage:{status:'incomplete'}});
 });
 test('uses an assumed gym zone and disallows arbitrary selectors',async()=>{
- expect((await query(await connect({AIMHARDER_GYM_TIME_ZONES:undefined}))).structuredContent).toMatchObject({gym:{timeZone:'Europe/Madrid',timeZoneStatus:'assumed'}});
+ expect((await query(await connect({AIMHARDER_TIME_ZONE: undefined}))).structuredContent).toMatchObject({gym:{timeZone:'Europe/Madrid',timeZoneStatus:'assumed'}});
  expect((await query(await connect(),{gymId:'foreign'})).isError).toBe(true);
  expect((await query(await connect(),{userID:4})).isError).toBe(true);
  expect(requests.filter(r=>r.url.pathname==='/api/activityCalendar')).toHaveLength(1);
@@ -187,10 +187,10 @@ test('empty array calendar is a complete empty period',async()=>{
  upstream.use(http.get('https://aimharder.es/api/activityCalendar',()=>HttpResponse.json({workouts:[]})));
  expect((await query(await connect())).structuredContent).toMatchObject({entries:[],coverage:{status:'complete'}});
 });
-test('explicit verified gym uses detail membership IDs without forwarding selectors',async()=>{
+test('the chosen verified gym uses detail membership IDs without forwarding selectors',async()=>{
  respond({'2026-03-29':[1]});
  upstream.use(http.get('https://aimharder.es/api/whoami',()=>HttpResponse.json({data:[{id:42,roles:[membership(),membership('other-gym',201)]}]})),http.get('https://aimharder.es/api/activity/workout',()=>HttpResponse.json(detail(1,{boxId:201}))));
- const result=await query(await connect({AIMHARDER_DEFAULT_GYM:'sample-gym',AIMHARDER_GYM_TIME_ZONES:'{"sample-gym":"Europe/Madrid","other-gym":"Europe/London"}'}),{gymId:'other-gym'});
+ const result=await query(await connect({AIMHARDER_GYM:'other-gym',AIMHARDER_TIME_ZONE:'Europe/London'}));
  expect(result.structuredContent).toMatchObject({gym:{id:'other-gym'},entries:[{timeZone:'Europe/London'}],coverage:{status:'complete'}});
  for(const request of requests.filter(r=>r.url.pathname.includes('/api/activity'))) expect([...request.url.searchParams.keys()].every(k=>['month','year','SEID'].includes(k))).toBe(true);
 });

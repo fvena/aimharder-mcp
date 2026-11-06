@@ -1,5 +1,5 @@
 import express, { type NextFunction, type Request, type RequestHandler, type Response } from 'express';
-import { gymIdSchema, gymSettingsSchema, weekdays, type BookingPlan, type Friends, type GymSettings, type HttpConfiguration, type Weekday } from '../config.js';
+import { gymIdSchema, timeZoneSchema, weekdays, type Friends, type HttpConfiguration, type Weekday } from '../config.js';
 import { type Accounts } from '../accounts.js';
 import { getClassParticipants, getClassSessions } from '../features/schedule.js';
 import type { Context } from '../features/context.js';
@@ -18,10 +18,11 @@ const messages: Record<string, { text: string; ok?: true }> = {
   'friend-removed': { text: 'Quitado de tus amigos.', ok: true },
   removed: { text: 'Acceso retirado. Se han borrado su contraseña y sus ajustes.', ok: true },
   'invitation-deleted': { text: 'Invitación anulada. El enlace ya no funciona.', ok: true },
+  'gym-chosen': { text: 'Gimnasio elegido. Configura ahora su zona horaria, tu plan y tus preferencias.', ok: true },
   invalid: { text: 'No se ha guardado: algún valor no es válido. Revísalo y vuelve a intentarlo.' },
   'plan-slot': { text: 'No se ha añadido: elige una clase del horario.' },
   friend: { text: 'No se ha guardado: cada amigo necesita un nombre, de 100 caracteres como máximo.' },
-  gyms: { text: 'No se ha guardado: marca al menos un gimnasio.' },
+  gym: { text: 'No se ha guardado: elige uno de tus gimnasios.' },
   label: { text: 'Escribe el nombre de la persona a la que quieres invitar.' },
   tz: { text: 'Elige una zona horaria de la lista.' },
   book: { text: 'Escribe un número de días entre 1 y 60, o déjalo vacío.' },
@@ -151,8 +152,9 @@ export function webRouter(config: HttpConfiguration, accounts: Accounts, provide
     return { attributes: ` aria-invalid="true" aria-describedby="${e(id)}-error"`, text: `<p class="field-error" id="${e(id)}-error" role="alert">${e(message.text)}</p>` };
   };
   const context = (res: Response) => accounts.context(res.locals.sub as string);
-  const gymsOf = async (ctx: Context | undefined): Promise<Gym[] | undefined> => {
-    try { return ctx ? (await ctx.upstream.account()).gyms : undefined; }
+  /** The account's gyms and its gym (undefined: none chosen among several, or the chosen one is gone), or undefined when AimHarder cannot be read. */
+  const accountOf = async (ctx: Context | undefined) => {
+    try { return ctx ? await ctx.upstream.account() : undefined; }
     catch { return undefined; }
   };
   const timetableOf = async (sub: string, ctx: Context, gym: Gym): Promise<Timetable> => {
@@ -162,7 +164,7 @@ export function webRouter(config: HttpConfiguration, accounts: Accounts, provide
     const timetable: Timetable = { byDay: { mon: [], tue: [], wed: [], thu: [], fri: [], sat: [], sun: [] }, names: [] };
     try {
       const start = today(gym.timeZone);
-      const schedule = await getClassSessions(ctx, { startDate: start, endDate: addDays(start, 6), gymId: gym.id });
+      const schedule = await getClassSessions(ctx, { startDate: start, endDate: addDays(start, 6) });
       for (const session of schedule.sessions) timetable.byDay[weekdayOf(session.date)].push({ startTime: session.startTime, className: session.classType.name });
       for (const day of weekdays) timetable.byDay[day].sort((a, b) => a.startTime.localeCompare(b.startTime) || a.className.localeCompare(b.className, 'es'));
       timetable.names = [...new Set(schedule.sessions.map((session) => session.classType.name))].sort((a, b) => a.localeCompare(b, 'es'));
@@ -233,7 +235,7 @@ ${signInForm({ action: `/invite/${encodeURIComponent(token)}`, submit: 'Aceptar 
         credentials: [401, 'El correo o la contraseña no son correctos. Usa los mismos que en la app de AimHarder.'],
         unavailable: [503, 'No se ha podido comprobar tu cuenta porque AimHarder no responde. Inténtalo de nuevo en unos minutos.'],
         owner: [400, 'Esta cuenta ya tiene acceso: es la de quien administra el servidor. Entra desde la página de inicio de sesión.'],
-        'no-gym': [403, 'Tu cuenta de AimHarder no es de ninguno de los gimnasios de este servidor. La invitación sigue sin usar, por si quieres entrar con otra cuenta.'],
+        'no-gym': [403, 'Tu cuenta de AimHarder no tiene ningún gimnasio. La invitación sigue sin usar, por si quieres entrar con otra cuenta.'],
       } as const;
       const [status, message] = reasons[result.error];
       invitePage(res, status, token, invitation.label, message);
@@ -264,57 +266,70 @@ ${signInForm({ action: `/invite/${encodeURIComponent(token)}`, submit: 'Aceptar 
 </ol></section>
 <section><h2>Prueba a preguntar</h2><ul><li>«¿Qué clases hay mañana?»</li><li>«¿Cuál es el entreno de hoy?»</li><li>«¿Quién va a la clase de las 14:00 de hoy?»</li><li>«Resérvame la clase de mañana a las 7:00»</li></ul>
 <p>Antes de reservar, cancelar o guardar algo, el asistente te enseña exactamente lo que va a hacer y no hace nada hasta que lo confirmas.</p>
-<p>Tu plan semanal, tu clase de entreno y tus amigos se configuran en <a href="/settings">Ajustes</a>.</p></section>`);
+<p>Tu gimnasio, tu plan semanal, tu clase de entreno y tus amigos se configuran en <a href="/settings">Ajustes</a>.</p></section>`);
   });
 
-  // Each account's own preferences: the weekly plan first, then preferences and friends.
+  // Each account's own settings: its gym (and that gym's rules) first, then the weekly plan, preferences and friends.
+  // Until the account has a gym (several and none chosen, or the chosen one is gone) only the choice of gym is shown.
   router.get('/settings', signedIn, async (req, res) => {
     const sub = res.locals.sub as string;
     const ctx = context(res);
     const config = accounts.preferences(sub);
-    const gyms = await gymsOf(ctx);
-    const friends = Object.entries(config?.friends ?? {}).sort(([, a], [, b]) => a.name.localeCompare(b.name, 'es'));
-    let sections: string;
-    if (ctx && config && gyms) {
-      const timetables = new Map(await Promise.all(gyms.map(async (gym) => [gym.id, await timetableOf(sub, ctx, gym)] as const)));
-      const heading = (gym: Gym) => (gyms.length > 1 ? `<h3>${e(gym.name)}</h3>` : '');
-      const plan = `<section id="plan"><h2>Plan semanal de reservas</h2><p class="lead">Las clases que sueles reservar. Con ellas basta con decir «resérvame la semana que viene». Puedes añadir varias el mismo día.</p>${notice(req, 'plan')}
-${gyms.map((gym) => {
-        const entries: BookingPlan = config.bookingPlans[gym.id] ?? [];
-        const timetable = timetables.get(gym.id)!;
-        const known = (day: Weekday, startTime: string, className: string) => timetable.byDay[day].some((slot) => slot.startTime === startTime && slot.className === className);
-        const haveTimetable = timetable.names.length > 0;
-        const rows = entries.map((entry) => `<tr><td>${dayNames[entry.day]}</td><td>${e(entry.startTime)}</td><td>${e(entry.className)}${haveTimetable && !known(entry.day, entry.startTime, entry.className) ? '<br><span class="field-error">No aparece en el horario de los próximos siete días</span>' : ''}</td>
-<td><form method="post" action="/settings/plan/remove"><input type="hidden" name="gym" value="${e(gym.id)}"><input type="hidden" name="day" value="${entry.day}">
+    const found = await accountOf(ctx);
+    if (!ctx || !config || !found) {
+      layout(res, 200, 'Ajustes', 'settings', '<h1>Ajustes</h1><section><p class="error">No se ha podido consultar tu cuenta en AimHarder, así que ahora no se muestran tus ajustes. Recarga la página en unos minutos.</p></section>');
+      return;
+    }
+    const { gyms, gym } = found;
+    const gone = config.gym !== undefined && !gym;
+    const choice = gyms.length > 1 || gone ? `<form method="post" action="/settings/gym"><label for="gym">Gimnasio</label><select id="gym" name="gym">
+${gym ? '' : '<option value="" selected disabled>Elige tu gimnasio</option>'}${gyms.map((entry) => `<option value="${e(entry.id)}"${gym?.id === entry.id ? ' selected' : ''}>${e(entry.name)}</option>`).join('')}</select>
+<p class="hint">${gym ? 'Si cambias de gimnasio se borran el resto de tus ajustes (zona horaria, márgenes, plan, clase de entreno, filtro y amigos), porque son del gimnasio anterior.' : 'Tu cuenta de AimHarder tiene varios. El asistente usa solo el que elijas.'}</p>
+<div class="btn-row"><button type="submit"${gym ? '' : ' class="primary"'}>${gym ? 'Cambiar de gimnasio' : 'Elegir gimnasio'}</button></div></form>` : '';
+    if (!gym) {
+      layout(res, 200, 'Ajustes', 'settings', `<h1>Ajustes</h1><section id="gimnasio"><h2>Tu gimnasio</h2>${notice(req, 'gimnasio')}
+${gone ? '<p class="notice error" role="alert">Tu gimnasio ya no aparece en tu cuenta de AimHarder. Elige otro para seguir usando el asistente.</p>' : '<p class="lead">Elige el gimnasio que quieres usar con el asistente. Hasta entonces no puede consultar ni reservar nada.</p>'}
+${choice}</section>`);
+      return;
+    }
+    const timetable = await timetableOf(sub, ctx, gym);
+    const [tz, book, cancel] = [fieldError(req, 'tz'), fieldError(req, 'book'), fieldError(req, 'cancel')];
+    const zone = config.timeZone ?? 'Europe/Madrid';
+    const zones = timeZones.includes(zone) ? timeZones : [zone, ...timeZones];
+    const gymSection = `<section id="gimnasio"><h2>Tu gimnasio</h2><p class="lead">${gyms.length > 1 ? 'El que usa el asistente y sus reglas.' : `${e(gym.name)}. Sus reglas, tal como las conoces.`}</p>${notice(req, 'gimnasio')}
+${choice}<form method="post" action="/settings/rules">
+<label for="tz">Zona horaria</label><select id="tz" name="tz"${tz.attributes}>${zones.map((entry) => `<option${entry === zone ? ' selected' : ''}>${e(entry)}</option>`).join('')}</select>
+${tz.text}<p class="hint">${config.timeZone ? 'La de la ciudad del gimnasio; con ella se interpretan las horas de las clases.' : 'Sin confirmar: se supone Europe/Madrid. Guárdala para poder reservar y cancelar desde el asistente.'}</p>
+<label for="book">Apertura de reservas (días)</label><input id="book" name="book" type="number" inputmode="numeric" min="1" max="60" value="${e(String(config.bookingWindowDays ?? ''))}" placeholder="Sin configurar"${book.attributes}>
+${book.text}<p class="hint">Con cuántos días de antelación se abren las reservas de una clase.</p>
+<label for="cancel">Margen de cancelación (minutos)</label><input id="cancel" name="cancel" type="number" inputmode="numeric" min="1" max="10080" value="${e(String(config.cancellationWindowMinutes ?? ''))}" placeholder="Sin configurar"${cancel.attributes}>
+${cancel.text}<p class="hint">Cuántos minutos antes de la clase cancelar puede costar el crédito.</p>
+<div class="btn-row"><button type="submit">Guardar reglas</button></div></form></section>`;
+    const entries = config.bookingPlan;
+    const known = (day: Weekday, startTime: string, className: string) => timetable.byDay[day].some((slot) => slot.startTime === startTime && slot.className === className);
+    const haveTimetable = timetable.names.length > 0;
+    const rows = entries.map((entry) => `<tr><td>${dayNames[entry.day]}</td><td>${e(entry.startTime)}</td><td>${e(entry.className)}${haveTimetable && !known(entry.day, entry.startTime, entry.className) ? '<br><span class="field-error">No aparece en el horario de los próximos siete días</span>' : ''}</td>
+<td><form method="post" action="/settings/plan/remove"><input type="hidden" name="day" value="${entry.day}">
 <input type="hidden" name="startTime" value="${e(entry.startTime)}"><input type="hidden" name="className" value="${e(entry.className)}"><button type="submit" class="danger small" aria-label="Quitar del plan: ${e(`${dayNames[entry.day]}, ${entry.startTime}, ${entry.className}`)}">Quitar</button></form></td></tr>`).join('');
-        const groups = weekdays.map((day) => `<optgroup label="${dayNames[day]}" data-day="${day}">${timetable.byDay[day].map((slot) => `<option value="${e(`${day}|${slot.startTime}|${slot.className}`)}">${e(slot.startTime)} · ${e(slot.className)}</option>`).join('')}</optgroup>`).join('');
-        return `${heading(gym)}${entries.length ? `<table><thead><tr><th scope="col">Día</th><th scope="col">Hora</th><th scope="col">Clase</th><th scope="col"><span class="sr-only">Acciones</span></th></tr></thead><tbody>${rows}</tbody></table>` : '<p>Todavía no hay clases en tu plan. Añade abajo las que sueles reservar.</p>'}
-${haveTimetable ? `<form method="post" action="/settings/plan/add" data-plan><input type="hidden" name="gym" value="${e(gym.id)}"><h3>Añadir una clase${gyms.length > 1 ? ` en ${e(gym.name)}` : ''}</h3>
-<div class="pair"><div><label for="day-${e(gym.id)}">Día</label><select id="day-${e(gym.id)}" name="day">${weekdays.map((day) => `<option value="${day}">${dayNames[day]}</option>`).join('')}</select></div>
-<div><label for="slot-${e(gym.id)}">Clase y hora</label><select id="slot-${e(gym.id)}" name="slot">${groups}</select></div></div>
-<div class="btn-row"><button type="submit" class="primary">Añadir al plan</button></div></form>` : '<p class="error">No se ha podido cargar el horario del gimnasio, así que ahora no puedes añadir clases. Recarga la página en unos minutos.</p>'}`;
-      }).join('')}</section>`;
-      const preferences = `<section id="preferencias"><h2>Preferencias</h2><p class="lead">Lo que el asistente entiende cuando no le das más detalles.</p>${notice(req, 'preferencias')}<form method="post" action="/settings/preferences">
-${gyms.length > 1 ? `<label for="defaultGym">Gimnasio por defecto</label><select id="defaultGym" name="defaultGym">${gyms.map((gym) => `<option value="${e(gym.id)}"${config.defaultGym === gym.id ? ' selected' : ''}>${e(gym.name)}</option>`).join('')}</select>
-<p class="hint">El que se usa cuando no nombras ninguno.</p>` : ''}
-${gyms.map((gym) => {
-        const current = config.workoutClasses[gym.id] ?? '';
-        const names = timetables.get(gym.id)!.names;
-        const options = [`<option value=""${current ? '' : ' selected'}>Ninguna</option>`, ...names.map((name) => `<option value="${e(name)}"${name === current ? ' selected' : ''}>${e(name)}</option>`),
-          ...(current && !names.includes(current) ? [`<option value="${e(current)}" selected>${e(current)} (no aparece en el horario de los próximos siete días)</option>`] : [])];
-        return `<label for="workout-${e(gym.id)}">Clase de tu entreno${gyms.length > 1 ? ` en ${e(gym.name)}` : ''}</label>
-<select id="workout-${e(gym.id)}" name="workout:${e(gym.id)}">${options.join('')}</select>
-<p class="hint">La clase que se entiende cuando preguntas «¿cuál es el entreno de hoy?».</p>`;
-      }).join('')}
+    const groups = weekdays.map((day) => `<optgroup label="${dayNames[day]}" data-day="${day}">${timetable.byDay[day].map((slot) => `<option value="${e(`${day}|${slot.startTime}|${slot.className}`)}">${e(slot.startTime)} · ${e(slot.className)}</option>`).join('')}</optgroup>`).join('');
+    const plan = `<section id="plan"><h2>Plan semanal de reservas</h2><p class="lead">Las clases que sueles reservar. Con ellas basta con decir «resérvame la semana que viene». Puedes añadir varias el mismo día.</p>${notice(req, 'plan')}
+${entries.length ? `<table><thead><tr><th scope="col">Día</th><th scope="col">Hora</th><th scope="col">Clase</th><th scope="col"><span class="sr-only">Acciones</span></th></tr></thead><tbody>${rows}</tbody></table>` : '<p>Todavía no hay clases en tu plan. Añade abajo las que sueles reservar.</p>'}
+${haveTimetable ? `<form method="post" action="/settings/plan/add" data-plan><h3>Añadir una clase</h3>
+<div class="pair"><div><label for="day">Día</label><select id="day" name="day">${weekdays.map((day) => `<option value="${day}">${dayNames[day]}</option>`).join('')}</select></div>
+<div><label for="slot">Clase y hora</label><select id="slot" name="slot">${groups}</select></div></div>
+<div class="btn-row"><button type="submit" class="primary">Añadir al plan</button></div></form>` : '<p class="error">No se ha podido cargar el horario del gimnasio, así que ahora no puedes añadir clases. Recarga la página en unos minutos.</p>'}</section>`;
+    const current = config.workoutClass ?? '';
+    const options = [`<option value=""${current ? '' : ' selected'}>Ninguna</option>`, ...timetable.names.map((name) => `<option value="${e(name)}"${name === current ? ' selected' : ''}>${e(name)}</option>`),
+      ...(current && !timetable.names.includes(current) ? [`<option value="${e(current)}" selected>${e(current)} (no aparece en el horario de los próximos siete días)</option>`] : [])];
+    const preferences = `<section id="preferencias"><h2>Preferencias</h2><p class="lead">Lo que el asistente entiende cuando no le das más detalles.</p>${notice(req, 'preferencias')}<form method="post" action="/settings/preferences">
+<label for="workout">Clase de tu entreno</label><select id="workout" name="workout">${options.join('')}</select>
+<p class="hint">La clase que se entiende cuando preguntas «¿cuál es el entreno de hoy?».</p>
 <label for="participantsFilter">Al preguntar quién va a una clase, mostrar</label>
 <select id="participantsFilter" name="participantsFilter"><option value="all"${config.participantsFilter !== 'friends' ? ' selected' : ''}>A todos los apuntados</option>
 <option value="friends"${config.participantsFilter === 'friends' ? ' selected' : ''}>Solo a mis amigos</option></select>
 <p class="hint">Con «Solo a mis amigos», el asistente te dirá también cuántas personas más hay apuntadas.</p>
 <div class="btn-row"><button type="submit">Guardar preferencias</button></div></form></section>`;
-      sections = plan + preferences;
-    } else {
-      sections = '<section><p class="error">No se ha podido consultar tu cuenta en AimHarder, así que ahora no se muestran tu plan ni tus preferencias. Recarga la página en unos minutos.</p></section>';
-    }
+    const friends = Object.entries(config.friends).sort(([, a], [, b]) => a.name.localeCompare(b.name, 'es'));
     const findLink = '<a class="button start" href="/settings/friends/find">Añadir amigos desde una clase</a>';
     // Removal buttons belong to a separate form, so that pressing Enter in a name saves the names instead of removing someone.
     const friendList = friends.length ? `<form id="remove-friend" method="post" action="/settings/friends/remove"></form>
@@ -322,21 +337,39 @@ ${gyms.map((gym) => {
 <label class="sr-only" for="friend-${e(id)}">Nombre de ${e(friend.name)}</label><input id="friend-${e(id)}" name="name:${e(id)}" value="${e(friend.name)}" maxlength="100" required>
 <button type="submit" form="remove-friend" name="id" value="${e(id)}" class="danger small" aria-label="Quitar a ${e(friend.name)}">Quitar</button></div>`).join('')}
 <div class="btn-row">${findLink}<button type="submit">Guardar nombres</button></div></form>` : `<p>Todavía no has añadido a nadie. Búscalos entre los apuntados a una clase a la que vayáis juntos.</p><div class="btn-row">${findLink}</div>`;
-    layout(res, 200, 'Ajustes', 'settings', `<h1>Ajustes</h1>${sections}
+    layout(res, 200, 'Ajustes', 'settings', `<h1>Ajustes</h1>${gymSection}${plan}${preferences}
 <section id="amigos"><h2>Amigos</h2><p class="lead">Cuando preguntes quién va a una clase, puedes ver solo a tus amigos, con el nombre por el que los conoces.</p>${notice(req, 'amigos')}
 ${friendList}</section>`);
+  });
+
+  router.post('/settings/gym', sameOrigin, signedIn, form, async (req, res) => {
+    const sub = res.locals.sub as string;
+    const gymId = field(req.body as Body, 'gym');
+    const found = await accountOf(context(res));
+    if (!found) { back(res, '/settings', 'gimnasio', 'invalid'); return; }
+    if (!gymIdSchema.safeParse(gymId).success || !found.gyms.some((entry) => entry.id === gymId)) { back(res, '/settings', 'gimnasio', 'gym'); return; }
+    save(res, 'gimnasio', () => accounts.chooseGym(sub, gymId), 'gym-chosen');
+  });
+
+  router.post('/settings/rules', sameOrigin, signedIn, form, (req, res) => {
+    const sub = res.locals.sub as string;
+    const body = req.body as Body;
+    const [timeZone, book, cancel] = [field(body, 'tz'), field(body, 'book'), field(body, 'cancel')];
+    const whole = (value: string, max: number) => (value === '' ? null : /^\d{1,5}$/.test(value) && Number(value) >= 1 && Number(value) <= max ? Number(value) : undefined);
+    // Check each value on its own, to point at the field that is wrong.
+    if (!timeZoneSchema.safeParse(timeZone).success) { back(res, '/settings', 'gimnasio', 'tz', 'tz'); return; }
+    const bookingWindowDays = whole(book, 60);
+    if (bookingWindowDays === undefined) { back(res, '/settings', 'gimnasio', 'book', 'book'); return; }
+    const cancellationWindowMinutes = whole(cancel, 10_080);
+    if (cancellationWindowMinutes === undefined) { back(res, '/settings', 'gimnasio', 'cancel', 'cancel'); return; }
+    save(res, 'gimnasio', () => accounts.setGymRules(sub, { timeZone, bookingWindowDays, cancellationWindowMinutes }));
   });
 
   router.post('/settings/preferences', sameOrigin, signedIn, form, (req, res) => {
     const sub = res.locals.sub as string;
     const body = req.body as Body;
-    const workoutClasses: Record<string, string | null> = {};
-    for (const [key, value] of Object.entries(body)) {
-      if (key.startsWith('workout:') && typeof value === 'string') workoutClasses[key.slice('workout:'.length)] = value.trim() || null;
-    }
     const filter = field(body, 'participantsFilter');
-    const defaultGym = field(body, 'defaultGym');
-    save(res, 'preferencias', () => accounts.setDefaults(sub, { workoutClasses, ...(filter ? { participantsFilter: filter } : {}), ...(defaultGym ? { defaultGym } : {}) }));
+    save(res, 'preferencias', () => accounts.setDefaults(sub, { workoutClass: field(body, 'workout') || null, ...(filter ? { participantsFilter: filter } : {}) }));
   });
 
   router.post('/settings/plan/add', sameOrigin, signedIn, form, (req, res) => {
@@ -345,13 +378,13 @@ ${friendList}</section>`);
     const [day, startTime, ...rest] = field(body, 'slot').split('|');
     const className = rest.join('|');
     if (!day || !startTime || !className || !(weekdays as readonly string[]).includes(day)) { back(res, '/settings', 'plan', 'plan-slot'); return; }
-    save(res, 'plan', () => accounts.addPlanEntry(sub, field(body, 'gym'), { day: day as Weekday, startTime, className }), 'plan-added');
+    save(res, 'plan', () => accounts.addPlanEntry(sub, { day: day as Weekday, startTime, className }), 'plan-added');
   });
   router.post('/settings/plan/remove', sameOrigin, signedIn, form, (req, res) => {
     const sub = res.locals.sub as string;
     const body = req.body as Body;
     const [day, startTime, className] = [field(body, 'day'), field(body, 'startTime'), field(body, 'className')];
-    save(res, 'plan', () => accounts.removePlanEntry(sub, field(body, 'gym'), { day: day as Weekday, startTime, className }), 'plan-removed');
+    save(res, 'plan', () => accounts.removePlanEntry(sub, { day: day as Weekday, startTime, className }), 'plan-removed');
   });
 
   router.post('/settings/friends/add', sameOrigin, signedIn, form, (req, res) => {
@@ -381,23 +414,24 @@ ${friendList}</section>`);
   router.get('/settings/friends/find', signedIn, async (req, res) => {
     const sub = res.locals.sub as string;
     const ctx = context(res);
-    const gyms = await gymsOf(ctx);
-    if (!ctx || !gyms?.length) {
+    const found = await accountOf(ctx);
+    if (ctx && found && !found.gym) { res.redirect(303, '/settings#gimnasio'); return; }
+    const gym = found?.gym;
+    if (!ctx || !gym) {
       layout(res, 503, 'Añadir amigos', 'settings', '<h1>Añadir amigos</h1><p class="error">No se ha podido consultar tu cuenta en AimHarder. Recarga la página en unos minutos.</p><p><a href="/settings#amigos">Volver a Ajustes</a></p>');
       return;
     }
-    const gym = gyms.find((entry) => entry.id === query(req, 'gym')) ?? gyms.find((entry) => entry.id === accounts.preferences(sub)?.defaultGym) ?? gyms[0]!;
     const date = /^\d{4}-\d{2}-\d{2}$/.test(query(req, 'date')) ? query(req, 'date') : today(gym.timeZone);
     let content = '';
     try {
       if (query(req, 'class') && query(req, 'time')) {
-        const result = await getClassParticipants(ctx, { date, className: query(req, 'class'), startTime: query(req, 'time'), gymId: gym.id, filter: 'all' });
+        const result = await getClassParticipants(ctx, { date, className: query(req, 'class'), startTime: query(req, 'time'), filter: 'all' });
         const { accountId } = await ctx.upstream.account();
         const friends: Friends = { ...accounts.preferences(sub)?.friends };
         const people = result.participants.filter((participant) => participant.userId !== accountId);
         // Keep friends' pictures current with what AimHarder shows now.
         accounts.refreshFriendPhotos(sub, Object.fromEntries(people.flatMap((person) => (person.photoUrl ? [[String(person.userId), person.photoUrl]] : []))));
-        const backToDay = `<a class="button start" href="/settings/friends/find?gym=${e(encodeURIComponent(gym.id))}&amp;date=${e(date)}">Volver a las clases del día</a>`;
+        const backToDay = `<a class="button start" href="/settings/friends/find?date=${e(date)}">Volver a las clases del día</a>`;
         const anyNew = people.some((person) => !Object.hasOwn(friends, String(person.userId)));
         content = `<h2>${e(query(req, 'class'))} · ${e(query(req, 'time'))}</h2>${people.length ? `<form method="post" action="/settings/friends/add"><fieldset class="plain"><legend class="sr-only">Personas apuntadas</legend>${people.map((person) => {
           const id = String(person.userId);
@@ -411,49 +445,26 @@ ${friendList}</section>`);
 <div class="btn-row">${backToDay}${anyNew ? '<button type="submit" class="primary">Añadir a mis amigos</button>' : ''}</div>${anyNew ? '<p class="hint">Después puedes cambiarles el nombre en Ajustes.</p>' : ''}</form>`
           : `<p>No hay nadie más apuntado a esta clase. Prueba con otra.</p><div class="btn-row">${backToDay}</div>`}`;
       } else {
-        content = `<h2>Clases del día</h2>${schedule(await getClassSessions(ctx, { startDate: date, endDate: date, gymId: gym.id }))}`;
+        content = `<h2>Clases del día</h2>${schedule(await getClassSessions(ctx, { startDate: date, endDate: date }))}`;
       }
     } catch {
       content = '<p class="error">No se ha podido consultar AimHarder. Recarga la página en unos minutos.</p>';
     }
     function schedule(result: Awaited<ReturnType<typeof getClassSessions>>) {
       if (!result.sessions.length) return '<p>No hay clases ese día. Elige otro arriba.</p>';
-      return `<ul class="rows">${result.sessions.map((session) => `<li><a href="/settings/friends/find?${e(new URLSearchParams({ gym: gym.id, date, class: session.classType.name, time: session.startTime }).toString())}">${e(session.startTime)} · ${e(session.classType.name)}</a>${session.occupancy !== null ? ` <span class="meta">${session.occupancy} apuntados</span>` : ''}</li>`).join('')}</ul>`;
+      return `<ul class="rows">${result.sessions.map((session) => `<li><a href="/settings/friends/find?${e(new URLSearchParams({ date, class: session.classType.name, time: session.startTime }).toString())}">${e(session.startTime)} · ${e(session.classType.name)}</a>${session.occupancy !== null ? ` <span class="meta">${session.occupancy} apuntados</span>` : ''}</li>`).join('')}</ul>`;
     }
     layout(res, 200, 'Añadir amigos', 'settings', `<p><a href="/settings#amigos">← Ajustes</a></p><h1>Añadir amigos</h1><p class="lead">Elige una clase en la que coincidas con ellos y marca a quién quieres añadir.</p>
-<section><form method="get" action="/settings/friends/find">${gyms.length > 1 ? `<label for="gym">Gimnasio</label><select id="gym" name="gym">${gyms.map((entry) => `<option value="${e(entry.id)}"${entry.id === gym.id ? ' selected' : ''}>${e(entry.name)}</option>`).join('')}</select>` : `<input type="hidden" name="gym" value="${e(gym.id)}">`}
+<section><form method="get" action="/settings/friends/find">
 <label for="date">Día</label><input id="date" name="date" type="date" value="${e(date)}" required><div class="btn-row"><button type="submit">Ver clases</button></div></form></section>
 <section>${content}</section>`);
   });
 
-  // The owner's administration: people with access and invitations, gyms, and the gym's rules.
-  const adminPage = async (req: Request, res: Response, status = 200, created?: { url: string; label: string; expiresAt: string }) => {
-    const owner = accounts.context(res.locals.sub as string);
-    let allGyms: Gym[] | undefined;
-    try { allGyms = owner ? (await owner.upstream.account(true)).gyms : undefined; } catch { allGyms = undefined; }
-    const saved = accounts.gymSettings();
-    const server = accounts.serverGymRules();
-    const active = saved.activeGyms;
-    const isActive = (gym: Gym) => !active?.length || active.includes(gym.id);
-    const gyms = allGyms?.filter(isActive);
+  // The owner's administration: people with access and invitations.
+  const adminPage = (req: Request, res: Response, status = 200, created?: { url: string; label: string; expiresAt: string }) => {
     const invitations = accounts.store.invitations();
     const members = accounts.members();
     const labelError = fieldError(req, 'label');
-    const rules = (gym: Gym) => {
-      const id = (kind: string) => `${kind}-${gym.id}`;
-      const [tz, book, cancel] = [fieldError(req, id('tz')), fieldError(req, id('book')), fieldError(req, id('cancel'))];
-      const currentZone = saved.gymTimeZones?.[gym.id] ?? '';
-      const serverZone = server.gymTimeZones[gym.id];
-      const zones = currentZone && !timeZones.includes(currentZone) ? [currentZone, ...timeZones] : timeZones;
-      const placeholder = (value: number | undefined) => (value === undefined ? 'Sin configurar' : `Por defecto: ${value}`);
-      return `${gyms!.length > 1 ? `<h3>${e(gym.name)}</h3>` : ''}
-<label for="${e(id('tz'))}">Zona horaria</label><select id="${e(id('tz'))}" name="tz:${e(gym.id)}"${tz.attributes}><option value="">Por defecto: ${e(serverZone ?? 'Europe/Madrid')}</option>${zones.map((zone) => `<option${zone === currentZone ? ' selected' : ''}>${e(zone)}</option>`).join('')}</select>
-${tz.text}<p class="hint">La de la ciudad del gimnasio; con ella se interpretan las horas de las clases.</p>
-<label for="${e(id('book'))}">Apertura de reservas (días)</label><input id="${e(id('book'))}" name="book:${e(gym.id)}" type="number" inputmode="numeric" min="1" max="60" value="${e(String(saved.bookingWindowDays?.[gym.id] ?? ''))}" placeholder="${e(placeholder(server.bookingWindowDays[gym.id]))}"${book.attributes}>
-${book.text}<p class="hint">Con cuántos días de antelación se abren las reservas de una clase.</p>
-<label for="${e(id('cancel'))}">Margen de cancelación (minutos)</label><input id="${e(id('cancel'))}" name="cancel:${e(gym.id)}" type="number" inputmode="numeric" min="1" max="10080" value="${e(String(saved.cancellationWindowMinutes?.[gym.id] ?? ''))}" placeholder="${e(placeholder(server.cancellationWindowMinutes[gym.id]))}"${cancel.attributes}>
-${cancel.text}<p class="hint">Cuántos minutos antes de la clase cancelar puede costar el crédito.</p>`;
-    };
     layout(res, status, 'Administrar', 'admin', `<h1>Administrar</h1>
 <section id="personas"><h2>Personas con acceso</h2><p class="lead">Cada persona usa el conector con su propia cuenta de AimHarder.</p>${notice(req, 'personas')}
 ${created ? `<div class="notice ok" role="status" tabindex="-1" data-notice>Invitación creada para ${e(created.label)}.</div>
@@ -465,19 +476,14 @@ ${invitations.length ? `<h3>Invitaciones pendientes</h3><ul class="rows">${invit
 <h3>Invitar a alguien</h3><form method="post" action="/admin/invitations"><label for="label">Nombre de la persona</label><input id="label" name="label" maxlength="100" required${labelError.attributes}>
 ${labelError.text}<p class="hint">Aparecerá en su invitación. Se crea un enlace de un solo uso, válido durante siete días, para que entre con su cuenta de AimHarder.</p>
 <div class="btn-row"><button type="submit" class="primary">Crear enlace de invitación</button></div></form></section>
-<section id="gimnasios"><h2>Gimnasios</h2><p class="lead">Los gimnasios que usa este servidor. Los demás no se muestran ni se pueden usar, en ninguna cuenta.</p>${notice(req, 'gimnasios')}
-${allGyms ? `<form method="post" action="/admin/gyms"><fieldset class="plain"><legend class="sr-only">Gimnasios activos</legend>${allGyms.map((gym) => `<label class="check"><input type="checkbox" name="gym" value="${e(gym.id)}"${isActive(gym) ? ' checked' : ''}><span class="who">${e(gym.name)}<span class="muted">${e(gym.id)}</span></span></label>`).join('')}</fieldset>
-<div class="btn-row"><button type="submit">Guardar gimnasios</button></div></form>` : '<p class="error">No se ha podido consultar AimHarder. Recarga la página en unos minutos.</p>'}</section>
-<section id="reglas"><h2>Reglas del gimnasio</h2><p class="lead">Se aplican a todas las cuentas. Un campo sin valor usa el de la configuración del servidor, que se muestra en gris.</p>${notice(req, 'reglas')}
-${gyms ? `<form method="post" action="/admin/gym">${gyms.map(rules).join('')}
-<div class="btn-row"><button type="submit">Guardar reglas</button></div></form>` : '<p class="error">No se ha podido consultar AimHarder. Recarga la página en unos minutos.</p>'}</section>`);
+`);
   };
   router.get('/admin', signedIn, ownerOnly, (req, res) => adminPage(req, res));
   router.post('/admin/invitations', sameOrigin, signedIn, ownerOnly, form, async (req, res) => {
     const label = field(req.body as Body, 'label').slice(0, 100);
     if (!label) { back(res, '/admin', 'personas', 'label', 'label'); return; }
     const { token, expiresAt } = accounts.store.createInvitation(label);
-    await adminPage(req, res, 201, { url: new URL(`/invite/${token}`, config.publicUrl).href, label, expiresAt });
+    adminPage(req, res, 201, { url: new URL(`/invite/${token}`, config.publicUrl).href, label, expiresAt });
   });
   router.post('/admin/invitations/delete', sameOrigin, signedIn, ownerOnly, form, (req, res) => {
     accounts.store.deleteInvitation(field(req.body as Body, 'id'));
@@ -500,34 +506,6 @@ ${gyms ? `<form method="post" action="/admin/gym">${gyms.map(rules).join('')}
     accounts.removeMember(member.id);
     back(res, '/admin', 'personas', 'removed');
   });
-  router.post('/admin/gyms', sameOrigin, signedIn, ownerOnly, form, (req, res) => {
-    const activeGyms = list(req.body as Body, 'gym').map((id) => id.trim());
-    const parsed = gymSettingsSchema.safeParse({ ...accounts.gymSettings(), activeGyms });
-    if (!activeGyms.length || !parsed.success) { back(res, '/admin', 'gimnasios', 'gyms'); return; }
-    accounts.saveGymSettings(parsed.data as GymSettings);
-    back(res, '/admin', 'gimnasios', 'saved');
-  });
-  router.post('/admin/gym', sameOrigin, signedIn, ownerOnly, form, (req, res) => {
-    const body = req.body as Body;
-    const next = { gymTimeZones: {} as Record<string, string>, bookingWindowDays: {} as Record<string, number>, cancellationWindowMinutes: {} as Record<string, number> };
-    for (const key of Object.keys(body)) {
-      const match = /^(tz|book|cancel):(.+)$/.exec(key);
-      const value = field(body, key);
-      if (!match || !value || !gymIdSchema.safeParse(match[2]).success) continue;
-      const [, kind, gymId] = match as unknown as [string, 'tz' | 'book' | 'cancel', string];
-      // Check each value on its own, to point at the field that is wrong.
-      const rule = kind === 'tz' ? { gymTimeZones: { [gymId]: value } } : { [kind === 'book' ? 'bookingWindowDays' : 'cancellationWindowMinutes']: { [gymId]: Number(value) } };
-      if (!gymSettingsSchema.safeParse(rule).success) { back(res, '/admin', 'reglas', kind, `${kind}-${gymId}`); return; }
-      if (kind === 'tz') next.gymTimeZones[gymId] = value;
-      else (kind === 'book' ? next.bookingWindowDays : next.cancellationWindowMinutes)[gymId] = Number(value);
-    }
-    const current = accounts.gymSettings();
-    const parsed = gymSettingsSchema.safeParse({ ...next, ...(current.activeGyms ? { activeGyms: current.activeGyms } : {}) });
-    if (!parsed.success) { back(res, '/admin', 'reglas', 'invalid'); return; }
-    accounts.saveGymSettings(parsed.data as GymSettings);
-    back(res, '/admin', 'reglas', 'saved');
-  });
-
   router.use((_error: unknown, _req: Request, res: Response, _next: NextFunction) => {
     sendPublicPage(res, 500, 'Error', '<h1>Algo ha fallado</h1><p>No se ha podido completar lo que pedías. Vuelve a intentarlo y, si sigue pasando, avisa a quien administra el servidor.</p><p><a href="/settings">Volver a Ajustes</a></p>');
   });

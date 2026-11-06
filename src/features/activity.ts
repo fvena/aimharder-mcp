@@ -29,7 +29,7 @@ export function getPersonalActivity(ctx: Context, input: ActivityQuery) {
   const parsed = activityQuerySchema.safeParse(input);
   if (!parsed.success) return Promise.reject(new AimHarderError('INVALID_ACTIVITY_QUERY'));
   const query = parsed.data;
-  return ctx.upstream.withGym(query.gymId, 'box', async (session) => {
+  return ctx.upstream.withGym('box', async (session) => {
     const { gym, boxId } = session;
     const accountId = session.accountId;
     const dates = [...calendarDates(query.startDate, query.endDate)];
@@ -81,7 +81,7 @@ export function prepareExerciseResult(ctx: Context, input: ExerciseResultQuery) 
   const parsed = exerciseResultQuerySchema.safeParse(input);
   if (!parsed.success) return Promise.reject(new AimHarderError('INVALID_EXERCISE_RESULT_QUERY'));
   const query = parsed.data;
-  return ctx.upstream.withGym(query.gymId, 'confirmed-zone', async (session) => {
+  return ctx.upstream.withGym('confirmed-zone', async (session) => {
     const { gym } = session;
     if (query.date > gymLocalToday(gym.timeZone)) throw new AimHarderError('INVALID_EXERCISE_RESULT_QUERY');
     const body = await session.read({ kind: 'exercise', exerciseId: query.exerciseId });
@@ -128,7 +128,7 @@ export function prepareExerciseResultDeletion(ctx: Context, input: ExerciseResul
   const parsed = exerciseResultDeletionQuerySchema.safeParse(input);
   if (!parsed.success) return Promise.reject(new AimHarderError('INVALID_EXERCISE_RESULT_DELETION_QUERY'));
   const query = parsed.data;
-  return ctx.upstream.withGym(query.gymId, 'confirmed-zone', async (session) => {
+  return ctx.upstream.withGym('confirmed-zone', async (session) => {
     const { gym, boxId } = session;
     const base = { gym, date: query.date, activityId: query.activityId };
     if (!(await ownActivityIds(session, query.date)).includes(query.activityId)) return { ...base, status: 'missing' as const,

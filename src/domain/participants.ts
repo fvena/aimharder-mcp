@@ -1,12 +1,12 @@
 import { z } from 'zod';
 import { dateSchema, timeSchema } from './classes.js';
-import { gymIdSchema, participantsFilterValues } from '../config.js';
+import { participantsFilterValues } from '../config.js';
 import { AimHarderError } from '../errors.js';
 
 export const participantsFilterSchema = z.enum(participantsFilterValues);
 export type ParticipantsFilter = z.infer<typeof participantsFilterSchema>;
 export const participantsQuerySchema = z.object({
-  date: dateSchema, className: z.string().trim().min(1).max(300), startTime: timeSchema, gymId: gymIdSchema.optional(),
+  date: dateSchema, className: z.string().trim().min(1).max(300), startTime: timeSchema,
   filter: participantsFilterSchema.optional().describe('all: every participant; friends: only the account holder\'s friends. Defaults to AIMHARDER_PARTICIPANTS_FILTER, else all.'),
 }).strict();
 export type ParticipantsQuery = z.infer<typeof participantsQuerySchema>;

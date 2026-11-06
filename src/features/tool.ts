@@ -25,11 +25,11 @@ export const preview = { readOnlyHint: true, destructiveHint: false, idempotentH
 export const write = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true };
 export const destructiveWrite = { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true };
 
-/** The selected gym, as every result reports it. */
+/** The account holder's gym, as every result reports it. */
 export const gymSchema = z.object({
   id: gymIdSchema, name: z.string(), timeZone: z.string(), timeZoneStatus: z.enum(['assumed', 'user-confirmed']),
 });
 /** A weekly booking plan entry. */
 export const planEntryOutput = z.object({ day: z.enum(weekdays), className: z.string(), startTime: z.string() });
-/** The query that accepts only an optional gym. */
-export const gymQuerySchema = z.object({ gymId: gymIdSchema.optional() }).strict();
+/** The query that accepts no arguments. */
+export const emptyQuerySchema = z.object({}).strict();

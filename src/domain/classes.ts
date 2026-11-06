@@ -1,12 +1,11 @@
 import { z } from 'zod';
-import { gymIdSchema } from '../config.js';
 import { AimHarderError } from '../errors.js';
 
 // Calendar arithmetic uses UTC only as a Gregorian date counter, never as the gym zone.
 export const dateSchema = z.iso.date().refine((date) => !date.startsWith('0000'));
 export const timeSchema = z.string().regex(/^(?:[01]\d|2[0-3]):[0-5]\d$/);
 export const classQuerySchema = z.object({
-  startDate: dateSchema, endDate: dateSchema, gymId: gymIdSchema.optional(),
+  startDate: dateSchema, endDate: dateSchema,
   startTime: timeSchema.optional(), className: z.string().min(1).max(300).optional(),
 }).strict().refine((query) => query.startDate <= query.endDate, { message: 'startDate must be on or before endDate.' });
 export type ClassQuery = z.infer<typeof classQuerySchema>;

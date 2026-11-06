@@ -1,10 +1,9 @@
 import { z } from 'zod';
 import { dateSchema } from './classes.js';
-import { gymIdSchema } from '../config.js';
 import { AimHarderError } from '../errors.js';
 import { parseWorkout, workoutSchema } from './workouts.js';
 
-export const activityQuerySchema = z.object({ startDate: dateSchema, endDate: dateSchema, gymId: gymIdSchema.optional() }).strict()
+export const activityQuerySchema = z.object({ startDate: dateSchema, endDate: dateSchema }).strict()
   .refine(q => q.startDate <= q.endDate && (Date.parse(`${q.endDate}T00:00:00Z`) - Date.parse(`${q.startDate}T00:00:00Z`)) / 86_400_000 < 31,
     { message: 'Supply an inclusive interval of 1 to 31 consecutive calendar dates.' });
 export type ActivityQuery = z.infer<typeof activityQuerySchema>;

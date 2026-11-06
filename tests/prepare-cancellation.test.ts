@@ -43,7 +43,7 @@ afterAll(() => upstream.close());
 
 async function connect(extra: Record<string, string | undefined> = {}) {
   const server = createServer({ AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic',
-    AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid"}', ...extra });
+    AIMHARDER_TIME_ZONE: 'Europe/Madrid', ...extra });
   const client = new Client({ name: 'cancellation-preparation-test', version: '1.0.0' });
   const [a, b] = InMemoryTransport.createLinkedPair();
   connections.push({ client, server });
@@ -87,7 +87,7 @@ test('ambiguous, missing, cancelled, waitlisted, and unsupported rows have no ex
 });
 
 test('unconfirmed zone, inaccessible gym and arbitrary selectors fail without a schedule query', async () => {
-  expect((await prepare(await connect({ AIMHARDER_GYM_TIME_ZONES: undefined }))).isError).toBe(true);
+  expect((await prepare(await connect({ AIMHARDER_TIME_ZONE: undefined }))).isError).toBe(true);
   expect((await prepare(await connect(), { gymId: 'other-gym' })).isError).toBe(true);
   expect((await prepare(await connect(), { reservationId: 900 })).isError).toBe(true);
   expect((await prepare(await connect(), { familyId: 1 })).isError).toBe(true);
@@ -98,7 +98,7 @@ test('the configured cancellation window warning starts at its wall-clock bounda
   upstream.use(http.get(`${appBase}/bookings`, () => HttpResponse.json(day())));
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-09-26T06:30:00Z')); // 08:30 in Madrid
-  const result = await prepare(await connect({ AIMHARDER_CANCELLATION_WINDOW_MINUTES: '{"sample-gym":90}' }));
+  const result = await prepare(await connect({ AIMHARDER_CANCELLATION_WINDOW_MINUTES: '90' }));
   expect(result.structuredContent).toMatchObject({ status: 'ready', credit: { balance: null } });
   expect(JSON.stringify(result.structuredContent)).toContain('90-minute');
   expect(insideCancellationWindow('2026-09-26', '10:00', 'Europe/Madrid', 90, new Date('2026-09-26T06:29:00Z'))).toBe(false);

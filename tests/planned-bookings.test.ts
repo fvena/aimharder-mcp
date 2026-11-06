@@ -10,10 +10,10 @@ const upstream = setupServer();
 const connections: { client: Client; server: ReturnType<typeof createServer> }[] = [];
 const requests: { method: string; pathname: string; day: string | null }[] = [];
 // Listed out of order: the plan is kept in weekday and start-time order.
-const plan = { 'sample-gym': [
+const plan = [
   { day: 'fri', className: 'CROSS', startTime: '07:00' }, { day: 'mon', className: 'CROSS', startTime: '07:00' }, { day: 'wed', className: 'FUNCIONAL', startTime: '19:00' },
-] };
-const sortedPlan = [plan['sample-gym'][1], plan['sample-gym'][2], plan['sample-gym'][0]];
+];
+const sortedPlan = [plan[1], plan[2], plan[0]];
 const row = (id: number, className: string, time: string, bookState: number | null = null) => ({
   id, classId: 10, className, time, ocupation: 8, limit: 20, enabled: 1, bookState, cancelledId: null, resadmin: 0, hidden: 0,
 });
@@ -56,7 +56,7 @@ afterAll(() => upstream.close());
 
 async function connect(extra: Record<string, string | undefined> = {}) {
   const server = createServer({ AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic-password',
-    AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid"}', AIMHARDER_BOOKING_PLAN: JSON.stringify(plan), ...extra });
+    AIMHARDER_TIME_ZONE: 'Europe/Madrid', AIMHARDER_BOOKING_PLAN: JSON.stringify(plan), ...extra });
   const client = new Client({ name: 'planned-bookings-test', version: '1.0.0' });
   const [a, b] = InMemoryTransport.createLinkedPair();
   connections.push({ client, server });
@@ -96,7 +96,7 @@ test('a planned day is booked through execute_booking_creation with its own refe
 
 test('reports not-yet-open days under the configured booking window without a reference', async () => {
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-05T08:00:00Z'));
-  const client = await connect({ AIMHARDER_BOOKING_WINDOW_DAYS: '{"sample-gym":2}' });
+  const client = await connect({ AIMHARDER_BOOKING_WINDOW_DAYS: '2' });
   const content = (await client.callTool({ name: 'prepare_planned_bookings', arguments: nextWeek })).structuredContent as Planned;
   expect(content.days[0]).toMatchObject({ status: 'not-yet-open', bookingOpensAt: '2026-11-07T07:00' });
   expect(content.days[0]!.actionReference).toBeUndefined();
@@ -112,9 +112,9 @@ test('without a plan every day is not-planned and no schedule is read', async ()
 
 test('books several planned classes on the same day, each with its own reference', async () => {
   vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-11-05T08:00:00Z'));
-  const client = await connect({ AIMHARDER_BOOKING_PLAN: JSON.stringify({ 'sample-gym': [
+  const client = await connect({ AIMHARDER_BOOKING_PLAN: JSON.stringify([
     { day: 'mon', className: 'HYROX', startTime: '07:00' }, { day: 'mon', className: 'CROSS', startTime: '07:00' },
-  ] }) });
+  ]) });
   const content = (await client.callTool({ name: 'prepare_planned_bookings', arguments: { startDate: '2026-11-09', endDate: '2026-11-10' } })).structuredContent as Planned;
   expect(content.days.map(day => [day.date, day.status, day.target?.className])).toEqual([
     ['2026-11-09', 'ready', 'CROSS'], ['2026-11-09', 'ready', 'HYROX'], ['2026-11-10', 'not-planned', undefined],
@@ -124,8 +124,8 @@ test('books several planned classes on the same day, each with its own reference
 
 test('rejects invalid plans and ranges', async () => {
   for (const value of [
-    '{"sample-gym":{"mon":{"className":"CROSS","startTime":"07:00"}}}', '{"sample-gym":[{"day":"monday","className":"CROSS","startTime":"07:00"}]}',
-    '{"sample-gym":[{"day":"mon","className":"CROSS","startTime":"7:00"}]}', 'not json',
+    '{"sample-gym":[]}', '[{"day":"monday","className":"CROSS","startTime":"07:00"}]',
+    '[{"day":"mon","className":"CROSS","startTime":"7:00"}]', 'not json',
   ]) {
     expect(() => createServer({ AIMHARDER_USERNAME: 'a', AIMHARDER_PASSWORD: 'b', AIMHARDER_BOOKING_PLAN: value })).toThrow();
   }
@@ -136,7 +136,7 @@ test('rejects invalid plans and ranges', async () => {
 });
 
 test('account context reports the configured defaults for the selected gym', async () => {
-  const client = await connect({ AIMHARDER_WORKOUT_CLASS: '{"sample-gym":"CROSS"}', AIMHARDER_PARTICIPANTS_FILTER: 'friends' });
+  const client = await connect({ AIMHARDER_WORKOUT_CLASS: 'CROSS', AIMHARDER_PARTICIPANTS_FILTER: 'friends' });
   const result = await client.callTool({ name: 'get_account_context', arguments: {} });
   expect(result.structuredContent).toMatchObject({ defaults: { workoutClass: 'CROSS', participantsFilter: 'friends', bookingPlan: sortedPlan } });
   expect(client.getInstructions()).toContain('prepare_planned_bookings');

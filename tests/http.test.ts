@@ -156,7 +156,7 @@ test('connects a client approved with the owner\'s AimHarder account and serves 
   expect(tools.tools.map((tool) => tool.name)).toContain('get_account_context');
   const result = await client.callTool({ name: 'get_account_context', arguments: {} });
   expect(result.isError).not.toBe(true);
-  expect(result.structuredContent).toMatchObject({ selectedGym: { id: 'sample-gym' }, settingsUrl: `${base}/settings` });
+  expect(result.structuredContent).toMatchObject({ gym: { id: 'sample-gym' }, settingsUrl: `${base}/settings` });
   for (const privateValue of [password, cookie, ownerSecret]) expect(JSON.stringify(result)).not.toContain(privateValue);
   await client.close();
 });

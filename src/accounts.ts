@@ -1,20 +1,23 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { applySettings, gymSettingsSchema, sortPlan, userSettingsSchema, type BookingPlan, type Configuration, type Friends, type GymSettings, type ParticipantsFilterValue, type PlanEntry, type UserSettings } from './config.js';
+import { applySettings, sortPlan, userSettingsSchema, type BookingPlan, type Configuration, type Friends, type ParticipantsFilterValue, type PlanEntry, type UserSettings } from './config.js';
 import { AimHarderError } from './errors.js';
 import { createContext, type Context } from './features/context.js';
-import { memberScope, type Member, type Store } from './store.js';
+import { memberScope, ownerScope, type Member, type Store } from './store.js';
 import { AimHarderUpstream } from './upstream.js';
 
 /** Subject of the owner, whose AimHarder account is configured in the environment. Members' subjects are their account IDs. */
 export const ownerSub = 'owner';
-const ownerScope = 'owner';
-const gymScope = 'gym';
 
 /** An account holder's own preferences as they apply now, to show and edit on the settings page. */
 export interface EditablePreferences {
-  defaultGym: string | undefined;
-  workoutClasses: Record<string, string>;
-  bookingPlans: Record<string, BookingPlan>;
+  /** The chosen gym; undefined when none is chosen (the account's only gym is used). */
+  gym: string | undefined;
+  /** The time zone the account holder confirmed for their gym, if any. */
+  timeZone: string | undefined;
+  bookingWindowDays: number | undefined;
+  cancellationWindowMinutes: number | undefined;
+  workoutClass: string | undefined;
+  bookingPlan: BookingPlan;
   participantsFilter: ParticipantsFilterValue;
   friends: Friends;
 }
@@ -25,8 +28,8 @@ export type JoinError = 'invitation' | 'credentials' | 'unavailable' | 'owner' |
 /**
  * The accounts a remote server serves: the owner, configured in the environment, and the members the owner invited.
  *
- * Each account gets its own context (AimHarder sessions and single-use previews), built from the environment, the gym
- * settings and its own settings. Members sign in with their AimHarder account: the server verifies it with AimHarder and
+ * Each account gets its own context (AimHarder sessions and single-use previews) for its one gym, built from its own
+ * settings (and, for the owner, the environment under them). Members sign in with their AimHarder account: the server verifies it with AimHarder and
  * accepts it only if the owner invited that account.
  */
 export class Accounts {
@@ -56,30 +59,14 @@ export class Accounts {
     return context;
   }
 
-  /** The account's configuration: the environment, the gym rules and its own settings (`own`, else the stored ones). */
+  /** The account's configuration: its own settings (`own`, else the stored ones), for the owner over the environment. */
   #configuration(sub: string, own = this.#userSettings(sub)): Configuration | undefined {
-    const gym = this.gymSettings();
-    if (sub === ownerSub) return applySettings(this.base, gym, own);
+    if (sub === ownerSub) return applySettings(this.base, own);
     const id = memberId(sub);
     const credentials = id === undefined ? undefined : this.store.credentials(id);
     if (!credentials) return undefined;
-    // Members share the gym rules and the default workout class, never the owner's personal preferences or write policy.
-    const base: Configuration = {
-      ...this.base, ...credentials, defaultGym: undefined, bookingPlans: {}, friends: {}, participantsFilter: 'all', requireBookingConfirmation: true,
-    };
-    return applySettings(base, gym, own);
-  }
-
-  gymSettings(): GymSettings { return this.store.settings(gymScope, gymSettingsSchema, {}); }
-
-  /** The gym rules from the environment, which apply where the owner has not set one. */
-  serverGymRules() {
-    return { gymTimeZones: this.base.gymTimeZones, bookingWindowDays: this.base.bookingWindowDays ?? {}, cancellationWindowMinutes: this.base.cancellationWindowMinutes ?? {} };
-  }
-
-  saveGymSettings(settings: GymSettings) {
-    this.store.saveSettings(gymScope, gymSettingsSchema.parse(settings));
-    this.#contexts.clear();
+    // The environment configures the owner's account: members start from nothing but their own settings.
+    return applySettings({ ...credentials, requireBookingConfirmation: true }, own);
   }
 
   /** The account holder's own preferences as they apply now: the environment's (for the owner) under their own settings. */
@@ -89,35 +76,55 @@ export class Accounts {
   }
 
   // Changes to an account's own preferences. Each validates the result and saves it as the account's own settings, or
-  // throws and saves nothing; a change that alters nothing that applies is not saved. A gym's plan and the friends list
-  // are saved whole once edited, so entries that came from the environment stay in them; other values keep following
-  // the environment until the account holder changes them.
+  // throws and saves nothing; a change that alters nothing that applies is not saved. The plan and the friends list are
+  // saved whole once edited, so entries that came from the environment stay in them; other values keep following the
+  // environment until the account holder changes them.
 
-  /** Add a class to a gym's weekly plan, in weekday and start-time order, without duplicates. */
-  addPlanEntry(sub: string, gymId: string, entry: PlanEntry) {
-    this.#change(sub, (own, current) => ({ ...own, bookingPlans: { ...own.bookingPlans, [gymId]: sortPlan([...current.bookingPlans[gymId] ?? [], entry]) } }));
+  /**
+   * Choose the account's gym (one of its gyms; the caller checks which it has). Choosing another gym clears every other
+   * setting, the environment's included, since they all refer to the previous gym: plan, workout class, time zone, booking
+   * and cancellation windows, participants filter and friends.
+   */
+  chooseGym(sub: string, gymId: string) {
+    this.#change(sub, (own, current) => (current.gym === gymId ? own : {
+      gym: gymId, timeZone: null, bookingWindowDays: null, cancellationWindowMinutes: null, workoutClass: null, bookingPlan: [], participantsFilter: 'all', friends: {},
+    }));
   }
 
-  /** Remove a class from a gym's weekly plan. */
-  removePlanEntry(sub: string, gymId: string, entry: PlanEntry) {
+  /** Add a class to the weekly plan, in weekday and start-time order, without duplicates. */
+  addPlanEntry(sub: string, entry: PlanEntry) {
+    this.#change(sub, (own, current) => ({ ...own, bookingPlan: sortPlan([...current.bookingPlan, entry]) }));
+  }
+
+  /** Remove a class from the weekly plan. */
+  removePlanEntry(sub: string, entry: PlanEntry) {
     const same = (other: PlanEntry) => other.day === entry.day && other.startTime === entry.startTime && other.className === entry.className;
-    this.#change(sub, (own, current) => ({ ...own, bookingPlans: { ...own.bookingPlans, [gymId]: (current.bookingPlans[gymId] ?? []).filter((other) => !same(other)) } }));
+    this.#change(sub, (own, current) => ({ ...own, bookingPlan: current.bookingPlan.filter((other) => !same(other)) }));
   }
 
   /**
-   * Set the defaults the assistant applies: by gym, the workout class (null for none, even when the environment sets one),
-   * the participants filter and the default gym. Values not given, or equal to what applies now, are left as they are.
+   * Set the gym's rules for this account: its time zone (which confirms it) and, null for none, the booking and
+   * cancellation windows. Values not given, or equal to what applies now, are left as they are.
    */
-  setDefaults(sub: string, defaults: { workoutClasses?: Record<string, string | null>; participantsFilter?: string; defaultGym?: string }) {
-    this.#change(sub, (own, current) => {
-      const workoutClasses = Object.entries(defaults.workoutClasses ?? {}).filter(([gymId, className]) => (current.workoutClasses[gymId] ?? null) !== className);
-      return {
-        ...own,
-        ...(workoutClasses.length ? { workoutClasses: { ...own.workoutClasses, ...Object.fromEntries(workoutClasses) } } : {}),
-        ...(defaults.participantsFilter === undefined || defaults.participantsFilter === current.participantsFilter ? {} : { participantsFilter: defaults.participantsFilter as ParticipantsFilterValue }),
-        ...(defaults.defaultGym === undefined || defaults.defaultGym === current.defaultGym ? {} : { defaultGym: defaults.defaultGym }),
-      };
-    });
+  setGymRules(sub: string, rules: { timeZone?: string; bookingWindowDays?: number | null; cancellationWindowMinutes?: number | null }) {
+    this.#change(sub, (own, current) => ({
+      ...own,
+      ...(rules.timeZone === undefined || rules.timeZone === current.timeZone ? {} : { timeZone: rules.timeZone }),
+      ...(rules.bookingWindowDays === undefined || rules.bookingWindowDays === (current.bookingWindowDays ?? null) ? {} : { bookingWindowDays: rules.bookingWindowDays }),
+      ...(rules.cancellationWindowMinutes === undefined || rules.cancellationWindowMinutes === (current.cancellationWindowMinutes ?? null) ? {} : { cancellationWindowMinutes: rules.cancellationWindowMinutes }),
+    }));
+  }
+
+  /**
+   * Set the defaults the assistant applies: the workout class (null for none, even when the environment sets one) and the
+   * participants filter. Values not given, or equal to what applies now, are left as they are.
+   */
+  setDefaults(sub: string, defaults: { workoutClass?: string | null; participantsFilter?: string }) {
+    this.#change(sub, (own, current) => ({
+      ...own,
+      ...(defaults.workoutClass === undefined || defaults.workoutClass === (current.workoutClass ?? null) ? {} : { workoutClass: defaults.workoutClass }),
+      ...(defaults.participantsFilter === undefined || defaults.participantsFilter === current.participantsFilter ? {} : { participantsFilter: defaults.participantsFilter as ParticipantsFilterValue }),
+    }));
   }
 
   /** Add friends, or update the name and picture of ones already listed. */
@@ -165,7 +172,7 @@ export class Accounts {
   /** Sign in with an AimHarder account: the owner's configured one, or a member's, verified with AimHarder. */
   async signIn(username: string, password: string): Promise<{ sub: string } | { error: SignInError }> {
     if (this.#isOwnerUsername(username)) return this.#isOwnerPassword(password) ? { sub: ownerSub } : { error: 'credentials' };
-    const verified = await verifyAccount(this.#verificationBase(), username, password);
+    const verified = await verifyAccount(username, password);
     if ('error' in verified) return { error: verified.error === 'no-gym' ? 'not-invited' : verified.error };
     const member = this.store.member(verified.accountId);
     if (!member) return { error: 'not-invited' };
@@ -182,7 +189,7 @@ export class Accounts {
     const invitation = this.store.invitation(token);
     if (!invitation) return { error: 'invitation' };
     if (this.#isOwnerUsername(username)) return { error: 'owner' };
-    const verified = await verifyAccount(this.#verificationBase(), username, password);
+    const verified = await verifyAccount(username, password);
     if ('error' in verified) return verified;
     if (!this.store.deleteInvitation(invitation.id)) return { error: 'invitation' };
     this.store.addMember(verified.accountId, invitation.label, { username, password });
@@ -193,12 +200,6 @@ export class Accounts {
   removeMember(id: number) {
     this.store.removeMember(id);
     this.#contexts.delete(String(id));
-  }
-
-  /** The environment with the active gyms, to verify that an account belongs to one of them. */
-  #verificationBase(): Configuration {
-    const active = this.gymSettings().activeGyms;
-    return active?.length ? { ...this.base, activeGyms: active } : this.base;
   }
 
   #isOwnerUsername(username: string) {
@@ -213,9 +214,9 @@ export class Accounts {
 
 /** The preferences an account holder edits, as they apply in a configuration; a workout class of none is left out. */
 function editable(config: Configuration): EditablePreferences {
-  const workoutClasses = Object.fromEntries(Object.entries(config.workoutClasses ?? {}).filter((entry): entry is [string, string] => entry[1] !== null));
   return {
-    defaultGym: config.defaultGym, workoutClasses, bookingPlans: { ...config.bookingPlans },
+    gym: config.gym, timeZone: config.timeZone, bookingWindowDays: config.bookingWindowDays, cancellationWindowMinutes: config.cancellationWindowMinutes,
+    workoutClass: config.workoutClass ?? undefined, bookingPlan: [...config.bookingPlan ?? []],
     participantsFilter: config.participantsFilter ?? 'all', friends: { ...config.friends },
   };
 }
@@ -227,10 +228,10 @@ const settingsScope = (sub: string) => {
   return id === undefined ? undefined : memberScope(id);
 };
 
-/** Sign in to AimHarder once with these credentials and report the account ID; the account needs an active gym. */
-async function verifyAccount(base: Configuration, username: string, password: string): Promise<{ accountId: number } | { error: 'credentials' | 'unavailable' | 'no-gym' }> {
+/** Sign in to AimHarder once with these credentials and report the account ID; the account needs a gym. */
+async function verifyAccount(username: string, password: string): Promise<{ accountId: number } | { error: 'credentials' | 'unavailable' | 'no-gym' }> {
   try {
-    const { accountId } = await new AimHarderUpstream({ ...base, username, password, defaultGym: undefined }).account();
+    const { accountId } = await new AimHarderUpstream({ username, password }).account();
     return { accountId };
   } catch (error) {
     if (error instanceof AimHarderError && error.code === 'AUTHENTICATION_FAILED') return { error: 'credentials' };

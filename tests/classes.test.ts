@@ -46,7 +46,7 @@ afterAll(() => upstream.close());
 async function connect(extra: Record<string, string | undefined> = {}) {
   const server = createServer({
     AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic-password',
-    AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid"}', ...extra,
+    AIMHARDER_TIME_ZONE: 'Europe/Madrid', ...extra,
   });
   const client = new Client({ name: 'class-behavioral-harness', version: '1.0.0' });
   const [a, b] = InMemoryTransport.createLinkedPair();
@@ -118,7 +118,7 @@ test.each([
 });
 
 test('uses an explicit assumed Europe/Madrid zone when none is configured', async () => {
-  const result = await query(await connect({ AIMHARDER_GYM_TIME_ZONES: undefined }));
+  const result = await query(await connect({ AIMHARDER_TIME_ZONE: undefined }));
   expect(result.isError).not.toBe(true);
   expect(result.structuredContent).toMatchObject({ gym: { timeZone: 'Europe/Madrid', timeZoneStatus: 'assumed' }, sessions: [{ timeZone: 'Europe/Madrid' }] });
   expect(classRequests()).toHaveLength(1);
@@ -160,23 +160,22 @@ test.each([403,429,500])('a failed later day does not become a complete or empty
   expect(requests.filter((r) => r.method === 'POST')).toHaveLength(1);
 });
 
-test('selects another verified gym with its own box and confirmed zone, then returns to the default', async () => {
+test('uses the chosen gym among several, with its own box and confirmed zone', async () => {
   upstream.use(
     http.get('https://aimharder.es/api/whoami', () => HttpResponse.json({ data: [{ id: 42, roles: [membership(), membership('second-gym', 300)] }] })),
     http.get(`${appBase}/bookings`, () => HttpResponse.json(daily())),
   );
-  const client = await connect({ AIMHARDER_DEFAULT_GYM: 'sample-gym', AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid","second-gym":"America/New_York","unverified-gym":"UTC"}' });
-  expect((await query(client, { gymId: 'second-gym' })).structuredContent).toMatchObject({ gym: { id: 'second-gym', timeZone: 'America/New_York' }, sessions: [{ timeZone: 'America/New_York' }] });
-  expect((await query(client)).structuredContent).toMatchObject({ gym: { id: 'sample-gym', timeZone: 'Europe/Madrid' } });
-  expect((await query(client, { gymId: 'unverified-gym' })).isError).toBe(true);
-  expect(classRequests().map((r) => r.url.searchParams.get('box'))).toEqual(['300', '200']);
+  const client = await connect({ AIMHARDER_GYM: 'second-gym', AIMHARDER_TIME_ZONE: 'America/New_York' });
+  expect((await query(client)).structuredContent).toMatchObject({ gym: { id: 'second-gym', timeZone: 'America/New_York' }, sessions: [{ timeZone: 'America/New_York' }] });
+  expect((await query(await connect({ AIMHARDER_GYM: 'unverified-gym' }))).isError).toBe(true);
+  expect(classRequests().map((r) => r.url.searchParams.get('box'))).toEqual(['300']);
 });
 
 test('rechecks membership before every interval and never sends credentials to a gym', async () => {
-  const client = await connect();
+  const client = await connect({ AIMHARDER_GYM: 'sample-gym' });
   await query(client);
   upstream.use(http.get('https://aimharder.es/api/whoami', () => HttpResponse.json({ data: [{ id: 42, roles: [membership('second-gym',300)] }] })));
-  expect((await query(client, { gymId: 'sample-gym' })).isError).toBe(true);
+  expect(JSON.stringify(await query(client))).toContain('GYM_NOT_ACCESSIBLE');
   expect(classRequests()).toHaveLength(1);
   expect(requests.filter((r) => r.method === 'POST').map((r) => r.url.hostname)).toEqual(['login.aimharder.es']);
 });
@@ -239,8 +238,8 @@ test.each([
   expect(classRequests()).toHaveLength(1);
 });
 
-test.each(['{', '[]', '{"sample-gym":"Invalid/Zone"}', '{"sample-gym":null}', '{"https://evil.invalid":"Europe/Madrid"}', '{"sample-gym":"+01:00"}'])('rejects invalid time-zone configuration: %s', async (configuration) => {
-  await expect(connect({ AIMHARDER_GYM_TIME_ZONES: configuration })).rejects.toThrow('IANA time zones');
+test.each(['', 'Invalid/Zone', 'null', 'https://evil.invalid', '+01:00'])('rejects invalid time-zone configuration: %s', async (configuration) => {
+  await expect(connect({ AIMHARDER_TIME_ZONE: configuration })).rejects.toThrow('IANA time zone');
   expect(requests).toHaveLength(0);
 });
 
@@ -258,17 +257,17 @@ test('does not infer an instant for repeated or nonexistent DST wall times', asy
   }
 });
 
-test('a legitimate gym ID matching an object property uses the default rather than inheriting a mapping', async () => {
+test('a gym ID matching an object property is an ordinary gym with the assumed zone', async () => {
   upstream.use(http.get('https://aimharder.es/api/whoami', () => HttpResponse.json({ data: [{ id: 42, roles: [membership('constructor')] }] })));
   upstream.use(http.get(`${appBase}/bookings`, () => HttpResponse.json(daily())));
-  const result = await query(await connect({ AIMHARDER_GYM_TIME_ZONES: '{}' }));
+  const result = await query(await connect({ AIMHARDER_TIME_ZONE: undefined }));
   expect(result.structuredContent).toMatchObject({ gym: { id: 'constructor', timeZone: 'Europe/Madrid', timeZoneStatus: 'assumed' } });
   expect(classRequests()).toHaveLength(1);
 });
 
 test('annotates sessions with the configured booking window only when configured', async () => {
   upstream.use(http.get(`${appBase}/bookings`, () => HttpResponse.json(daily([session()]))));
-  const configured = await query(await connect({ AIMHARDER_BOOKING_WINDOW_DAYS: '{"sample-gym":7}' }), { startDate: '2099-01-10', endDate: '2099-01-10' });
+  const configured = await query(await connect({ AIMHARDER_BOOKING_WINDOW_DAYS: '7' }), { startDate: '2099-01-10', endDate: '2099-01-10' });
   const sessions = (configured.structuredContent as { sessions: Record<string, unknown>[] }).sessions;
   expect(sessions[0]).toMatchObject({ bookingOpensAt: `2099-01-03T${String(sessions[0]!.startTime)}`, bookingOpen: false });
   const plain = await query(await connect(), { startDate: '2099-01-10', endDate: '2099-01-10' });

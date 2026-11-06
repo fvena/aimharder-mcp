@@ -71,8 +71,7 @@ test('discovers the only gym through MCP, preserves its name, and reuses the ses
   expect(result.isError).not.toBe(true);
   expect(result.structuredContent).toMatchObject({
     account: { authenticated: true },
-    selectedGym: { id: 'sample-gym', name: 'Gimnasio de prueba', timeZone: 'Europe/Madrid', timeZoneStatus: 'assumed' },
-    gyms: [{ id: 'sample-gym' }],
+    gym: { id: 'sample-gym', name: 'Gimnasio de prueba', timeZone: 'Europe/Madrid', timeZoneStatus: 'assumed' },
   });
   for (const privateValue of [username, password, cookie, 'Private Fixture Name', 'private-photo', 'synthetic-refresh-token', 'synthetic-permission-token']) {
     expect(JSON.stringify(result)).not.toContain(privateValue);
@@ -83,15 +82,34 @@ test('discovers the only gym through MCP, preserves its name, and reuses the ses
   ]);
 });
 
-test('requires a valid default for several gyms and allows a per-query override', async () => {
+test('uses the only gym, or the chosen one, and asks to choose among several', async () => {
   upstream.use(http.get(whoamiUrl, () => HttpResponse.json({ data: [account([gym(), gym('second-gym', 'Segundo gimnasio')])] })));
   const missing = await query(await connect());
   expect(missing.isError).toBe(true);
-  expect(JSON.stringify(missing)).toContain('DEFAULT_GYM_REQUIRED');
-  const client = await connect({ AIMHARDER_DEFAULT_GYM: 'sample-gym' });
-  expect((await query(client)).structuredContent).toMatchObject({ selectedGym: { id: 'sample-gym' } });
-  expect((await query(client, { gymId: 'second-gym' })).structuredContent).toMatchObject({ selectedGym: { id: 'second-gym' } });
-  expect((await query(client)).structuredContent).toMatchObject({ selectedGym: { id: 'sample-gym' } });
+  expect(JSON.stringify(missing)).toContain('GYM_REQUIRED');
+  expect(JSON.stringify(missing)).toContain('second-gym');
+  const client = await connect({ AIMHARDER_GYM: 'second-gym', AIMHARDER_TIME_ZONE: 'Atlantic/Canary' });
+  const result = await query(client);
+  expect(result.structuredContent).toMatchObject({ gym: { id: 'second-gym', name: 'Segundo gimnasio', timeZone: 'Atlantic/Canary', timeZoneStatus: 'user-confirmed' } });
+  expect(result.structuredContent).not.toHaveProperty('gyms');
+  expect(result.structuredContent).not.toHaveProperty('selectedGym');
+});
+
+test('accepts no gym argument on any tool', async () => {
+  const client = await connect();
+  for (const tool of (await client.listTools()).tools) {
+    expect(Object.keys((tool.inputSchema as { properties?: Record<string, unknown> }).properties ?? {})).not.toContain('gymId');
+  }
+  expect((await query(client, { gymId: 'sample-gym' })).isError).toBe(true);
+});
+
+test.each([
+  { AIMHARDER_DEFAULT_GYM: 'sample-gym' }, { AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid"}' },
+  { AIMHARDER_BOOKING_WINDOW_DAYS: '{"sample-gym":7}' }, { AIMHARDER_CANCELLATION_WINDOW_MINUTES: '{"sample-gym":90}' },
+  { AIMHARDER_WORKOUT_CLASS: '{"sample-gym":"CROSS"}' }, { AIMHARDER_BOOKING_PLAN: '{"sample-gym":[]}' },
+])('explains how to rename per-gym configuration: %j', async (extra) => {
+  await expect(connect(extra)).rejects.toThrow('AIMHARDER_GYM');
+  expect(requests).toHaveLength(0);
 });
 
 test('recovers an expired session once and stops when the retry also expires', async () => {
@@ -109,7 +127,7 @@ test('recovers an expired session once and stops when the retry also expires', a
 
 test.each([
   { AIMHARDER_USERNAME: '' }, { AIMHARDER_PASSWORD: '   ' },
-  { AIMHARDER_DEFAULT_GYM: '' }, { AIMHARDER_DEFAULT_GYM: 'https://untrusted.invalid' },
+  { AIMHARDER_GYM: '' }, { AIMHARDER_GYM: 'https://untrusted.invalid' },
 ])('rejects invalid required configuration before network access: %j', async (extra) => {
   await expect(connect(extra)).rejects.toThrow('Set AIMHARDER_USERNAME');
   expect(requests).toHaveLength(0);
@@ -120,21 +138,11 @@ test('rejects missing credentials before exposing tools', () => {
   expect(requests).toHaveLength(0);
 });
 
-test('rejects unknown explicit and configured gyms without requesting their hosts', async () => {
-  const client = await connect();
-  const result = await query(client, { gymId: 'unverified-gym' });
+test('rejects a configured gym the account does not have without requesting its host', async () => {
+  const result = await query(await connect({ AIMHARDER_GYM: 'unverified-gym' }));
   expect(result.isError).toBe(true);
   expect(JSON.stringify(result)).toContain('GYM_NOT_ACCESSIBLE');
-  const invalidDefault = await query(await connect({ AIMHARDER_DEFAULT_GYM: 'unverified-gym' }), { gymId: 'sample-gym' });
-  expect(invalidDefault.isError).toBe(true);
   expect(requests.every((r) => [loginUrl, whoamiUrl].includes(r.url))).toBe(true);
-});
-
-test('includes discovered gym IDs when a default needs configuring', async () => {
-  upstream.use(http.get(whoamiUrl, () => HttpResponse.json({ data: [account([gym(), gym('second-gym')])] })));
-  const result = await query(await connect(), { gymId: 'sample-gym' });
-  expect(result.isError).toBe(true);
-  expect(JSON.stringify(result)).toContain('second-gym');
 });
 
 test.each([
@@ -159,8 +167,8 @@ test.each([
 test('deduplicates identical memberships and preserves the original gym name', async () => {
   upstream.use(http.get(whoamiUrl, () => HttpResponse.json({ data: [account([gym('sample-gym', '  Gimnasio Ñ  '), gym('sample-gym', '  Gimnasio Ñ  ')])] })));
   const result = await query(await connect());
-  expect(result.structuredContent).toMatchObject({ gyms: [{ name: '  Gimnasio Ñ  ' }] });
-  expect((result.structuredContent as { gyms: unknown[] }).gyms).toHaveLength(1);
+  expect(result.isError).not.toBe(true);
+  expect(result.structuredContent).toMatchObject({ gym: { id: 'sample-gym', name: '  Gimnasio Ñ  ' } });
 });
 
 test.each([401, 403, 429, 500])('stops on login HTTP %s and does not repeat authentication on the next tool call', async (status) => {
@@ -286,12 +294,11 @@ test('refreshes membership discovery instead of caching access across queries', 
   const client = await connect();
   expect((await query(client)).isError).not.toBe(true);
   upstream.use(http.get(whoamiUrl, () => HttpResponse.json({ data: [account([gym('new-gym')])] })));
-  expect((await query(client, { gymId: 'sample-gym' })).isError).toBe(true);
-  expect((await query(client)).structuredContent).toMatchObject({ selectedGym: { id: 'new-gym' } });
+  expect((await query(client)).structuredContent).toMatchObject({ gym: { id: 'new-gym' } });
   expect(requests.filter((r) => r.method === 'POST')).toHaveLength(1);
 });
 
-test.each([{ gymId: 'https://evil.invalid' }, { gymId: 123 }, { extra: 'unexpected' }])('rejects invalid MCP tool arguments before authentication: %#', async (args) => {
+test.each([{ gymId: 'sample-gym' }, { extra: 'unexpected' }])('rejects invalid MCP tool arguments before authentication: %#', async (args) => {
   const result = await query(await connect(), args);
   expect(result.isError).toBe(true);
   expect(requests).toHaveLength(0);

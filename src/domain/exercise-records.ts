@@ -3,7 +3,7 @@ import { gymIdSchema } from '../config.js';
 import { AimHarderError } from '../errors.js';
 
 export const exerciseIdSchema = z.number().int().positive().safe();
-export const exercise1RMQuerySchema = z.object({ exerciseId: exerciseIdSchema, gymId: gymIdSchema.optional() }).strict();
+export const exercise1RMQuerySchema = z.object({ exerciseId: exerciseIdSchema }).strict();
 export type Exercise1RMQuery = z.infer<typeof exercise1RMQuerySchema>;
 
 const plausibleTimestampSchema = z.number().int().safe().refine(value => value >= Date.UTC(2000, 0, 1) && value < Date.UTC(2100, 0, 1));

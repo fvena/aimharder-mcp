@@ -55,7 +55,7 @@ fly scale count 1
 
 #### Upgrading a deployment from before accounts
 
-Earlier versions stored nothing and approved connections with the owner secret. (Data files from the first multi-account version are upgraded on start: members, invitations and gym rules stay, and personal settings in the old plan, friends and filter formats are cleared, to be entered again on the settings page.) To upgrade, create the volume once, then deploy:
+Earlier versions stored nothing and approved connections with the owner secret. (Data files of earlier multi-account versions are upgraded on start. Members and invitations stay. Each account keeps what applied at its gym: its default gym, else the only gym its settings name, with that gym's rules from `/admin` (time zone, windows), workout class and plan. The shared gym rules and active gyms are dropped. Personal settings in the formats of the first multi-account version are cleared, to be entered again on the settings page.) To upgrade, create the volume once, then deploy:
 
 ```sh
 fly volumes create aimharder_data --region ams --size 1 -a <app>
@@ -108,14 +108,12 @@ Then authenticate from `/mcp`.
 
 ## 4. Invite friends and change settings
 
-Every account has a settings page at `<MCP_PUBLIC_URL>/settings` (sign in with AimHarder): default gym (with several active gyms), workout class and weekly booking plan chosen from the gym's timetable (several classes per day allowed), participant filter, and friends. Friends are added by ticking them among a class's participants; their name can be changed to the one you know them by, and their AimHarder picture is shown and refreshed when they appear again. One small script from the server (`/assets/app.js`) shows only the chosen weekday's classes in the plan form, adds copy buttons for the connector address and invitation links, and moves focus to the outcome of the last change; every page works without it. `get_account_context` reports this URL as `settingsUrl`. See [configuration](configuration.md#settings-page-http-only) for how these settings combine with the environment.
+Every account has a settings page at `<MCP_PUBLIC_URL>/settings` (sign in with AimHarder): its gym (chosen among the account's gyms when it has several; changing it clears the other settings) and that gym's time zone, booking window and cancellation window, workout class and weekly booking plan chosen from the gym's timetable (several classes per day allowed), participant filter, and friends. Friends are added by ticking them among a class's participants; their name can be changed to the one you know them by, and their AimHarder picture is shown and refreshed when they appear again. One small script from the server (`/assets/app.js`) shows only the chosen weekday's classes in the plan form, adds copy buttons for the connector address and invitation links, and moves focus to the outcome of the last change; every page works without it. `get_account_context` reports this URL as `settingsUrl`. See [configuration](configuration.md#settings-page-http-only) for how these settings combine with the environment.
 
-The owner also has `/admin`:
+The owner also has `/admin`, for people only (each account configures its own gym):
 
 - **Personas con acceso**: lists members and pending invitations, and creates invitations. Removing a member asks for confirmation first, then deletes their stored credentials and settings and invalidates their tokens and sessions.
 - **Invitar a alguien** (in the same section): creates a single-use link, valid for seven days, for a named person. The link is shown once. The person opens it, signs in with their AimHarder account, and gets a page with the connector address and the steps for Claude and ChatGPT.
-- **Gimnasios**: the gyms the server uses, chosen among the owner's. The others disappear for every account, and invitations from people with none of them are refused.
-- **Reglas del gimnasio**: time zone, booking window and cancellation window per active gym, for every account. An empty field uses the environment's value, shown as its placeholder.
 
 The pages are in Spanish, for the gym's members.
 

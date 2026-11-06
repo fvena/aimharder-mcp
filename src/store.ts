@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { z } from 'zod';
+import { userSettingsSchema } from './config.js';
 
 /** An account holder invited by the owner. `id` is their AimHarder account ID. */
 export interface Member { id: number; label: string; generation: string; createdAt: string }
@@ -32,12 +33,52 @@ export class Store {
         CREATE TABLE members (id INTEGER PRIMARY KEY, label TEXT NOT NULL, credentials TEXT NOT NULL, generation TEXT NOT NULL, created_at TEXT NOT NULL);
         CREATE TABLE invitations (id TEXT PRIMARY KEY, label TEXT NOT NULL, expires_at TEXT NOT NULL);
         CREATE TABLE settings (scope TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
-        PRAGMA user_version = 2;`);
-    } else if (version === 1) {
+        PRAGMA user_version = 3;`);
+    } else if (version === 1 || version === 2) {
       // Version 2 changed the booking plan, friends and participant filter formats: personal settings start over.
-      this.#db.exec("DELETE FROM settings WHERE scope <> 'gym'; PRAGMA user_version = 2;");
-    } else if (version !== 2) {
+      if (version === 1) this.#db.exec("DELETE FROM settings WHERE scope <> 'gym';");
+      this.#migrateToOneGym();
+    } else if (version !== 3) {
       throw new Error('Unsupported data file version');
+    }
+  }
+
+  /**
+   * Version 3: each account uses one gym and keeps its rules itself. Each account's settings keep what applied at its gym
+   * (its default gym, else the only gym the stored settings name): the shared gym rules (time zone, booking and
+   * cancellation windows) and its own workout class and plan there. The shared gym rules and active gyms are dropped.
+   */
+  #migrateToOneGym() {
+    const record = (value: unknown): Record<string, unknown> => (value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {});
+    const read = (scope: string) => {
+      const row = this.#db.prepare('SELECT value FROM settings WHERE scope = ?').get(scope) as { value: string } | undefined;
+      try { return record(row && JSON.parse(row.value)); } catch { return {}; }
+    };
+    const rules = read('gym');
+    const scopes = new Set([ownerScope, ...this.members().map((entry) => memberScope(entry.id)),
+      ...(this.#db.prepare("SELECT scope FROM settings WHERE scope <> 'gym'").all() as { scope: string }[]).map((row) => row.scope)]);
+    this.#db.exec('BEGIN');
+    try {
+      for (const scope of scopes) {
+        const own = read(scope);
+        const keyed = [own.workoutClasses, own.bookingPlans, rules.gymTimeZones, rules.bookingWindowDays, rules.cancellationWindowMinutes].map(record);
+        const named = new Set(keyed.flatMap((values) => Object.keys(values)));
+        const active = Array.isArray(rules.activeGyms) ? rules.activeGyms : [];
+        const gym = typeof own.defaultGym === 'string' ? own.defaultGym
+          : active.length === 1 ? active[0] : named.size === 1 ? [...named][0] : undefined;
+        const at = (values: Record<string, unknown>) => (typeof gym === 'string' && Object.hasOwn(values, gym) ? values[gym] : undefined);
+        const [workoutClass, bookingPlan, timeZone, bookingWindowDays, cancellationWindowMinutes] = keyed.map(at);
+        const candidate = { gym, timeZone, bookingWindowDays, cancellationWindowMinutes, workoutClass, bookingPlan, participantsFilter: own.participantsFilter, friends: own.friends };
+        // Keep each value that is still valid on its own.
+        const next = Object.fromEntries(Object.entries(candidate).filter(([key, value]) => value !== undefined && userSettingsSchema.safeParse({ [key]: value }).success));
+        if (Object.keys(next).length) this.saveSettings(scope, userSettingsSchema.parse(next));
+        else this.#db.prepare('DELETE FROM settings WHERE scope = ?').run(scope);
+      }
+      this.#db.exec("DELETE FROM settings WHERE scope = 'gym'; PRAGMA user_version = 3;");
+      this.#db.exec('COMMIT');
+    } catch (error) {
+      this.#db.exec('ROLLBACK');
+      throw error;
     }
   }
 
@@ -129,6 +170,8 @@ export class Store {
 }
 
 export const memberScope = (id: number) => `member:${id}`;
+/** The settings scope of the owner's account. */
+export const ownerScope = 'owner';
 
 interface MemberRow { id: number; label: string; generation: string; created_at: string }
 interface InvitationRow { id: string; label: string; expires_at: string }

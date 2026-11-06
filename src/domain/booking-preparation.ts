@@ -1,9 +1,8 @@
 import { z } from 'zod';
 import { dateSchema, parseClassDay, timeSchema } from './classes.js';
-import { gymIdSchema } from '../config.js';
 
 export const bookingCreationQuerySchema = z.object({
-  gymId: gymIdSchema.optional(), date: dateSchema,
+  date: dateSchema,
   className: z.string().min(1).max(300).refine((name) => name.trim().length > 0),
   startTime: timeSchema, endTime: timeSchema,
 }).strict();
@@ -12,18 +11,17 @@ export const bookingCancellationQuerySchema = bookingCreationQuerySchema;
 export type BookingCancellationQuery = z.infer<typeof bookingCancellationQuerySchema>;
 export const maxPlannedBookingDays = 14;
 export const plannedBookingQuerySchema = z.object({
-  gymId: gymIdSchema.optional(),
   startDate: dateSchema.describe('First gym-local date, inclusive (YYYY-MM-DD).'),
   endDate: dateSchema.describe(`Last gym-local date, inclusive. At most ${maxPlannedBookingDays} calendar dates in all.`),
 }).strict().refine(query => query.startDate <= query.endDate
   && (Date.parse(`${query.endDate}T00:00:00Z`) - Date.parse(`${query.startDate}T00:00:00Z`)) / 86_400_000 < maxPlannedBookingDays);
 export type PlannedBookingQuery = z.infer<typeof plannedBookingQuerySchema>;
 export const bookingExecutionSchema = z.object({
-  gymId: gymIdSchema.optional(), actionReference: z.string().regex(/^[a-f0-9]{64}$/), confirmed: z.literal(true).optional(),
+  actionReference: z.string().regex(/^[a-f0-9]{64}$/), confirmed: z.literal(true).optional(),
 }).strict();
 export type BookingExecution = z.infer<typeof bookingExecutionSchema>;
 export const lateCancellationExecutionSchema = z.object({
-  gymId: gymIdSchema.optional(), actionReference: z.string().regex(/^[a-f0-9]{64}$/), confirmedCreditLoss: z.literal(true).optional(),
+  actionReference: z.string().regex(/^[a-f0-9]{64}$/), confirmedCreditLoss: z.literal(true).optional(),
 }).strict();
 export type LateCancellationExecution = z.infer<typeof lateCancellationExecutionSchema>;
 

@@ -70,6 +70,7 @@ export function createServerForContext(ctx: Context) {
 
 const instructions = [
   'AimHarder for one account holder: classes, bookings, published workouts, personal records and activity at their gym.',
+  'Every tool uses the account holder\'s one gym. GYM_REQUIRED means their account has several and none is chosen: ask them to choose it on the settings page.',
   'Defaults come from the account holder\'s configuration; get_account_context reports them. Apply them unless the account holder asks otherwise:',
   '- Workouts: "what is today\'s workout" means the configured workout class. Omit className; pass it only when they name another class (for example HYROX), using the exact name from classNamesAvailable.',
   '- Participants: "who is coming" uses the configured filter, often only the account holder\'s friends. Call friends by their friendName. Say how many others are booked (totalParticipants) and offer filter all. When the client can show images, photoUrl is a public thumbnail of each participant.',
