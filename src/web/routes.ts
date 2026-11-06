@@ -296,13 +296,14 @@ ${choice}</section>`);
     }
     const timetable = await timetableOf(sub, ctx, gym);
     const [tz, book, cancel] = [fieldError(req, 'tz'), fieldError(req, 'book'), fieldError(req, 'cancel')];
-    // An unconfirmed zone stays so until the account holder picks one: saving the other rules does not confirm it.
-    const zone = config.timeZone;
-    const zones = zone === undefined || timeZones.includes(zone) ? timeZones : [zone, ...timeZones];
+    // An unconfirmed zone shows Europe/Madrid, marked as unconfirmed: saving the rules confirms the zone shown.
+    const zone = config.timeZone ?? 'Europe/Madrid';
+    const confirmed = config.timeZone !== undefined;
+    const zones = timeZones.includes(zone) ? timeZones : [zone, ...timeZones];
     const gymSection = `<section id="gimnasio"><h2>Tu gimnasio</h2><p class="lead">${gyms.length > 1 ? 'El que usa el asistente y sus reglas.' : `${e(gym.name)}. Sus reglas, tal como las conoces.`}</p>${notice(req, 'gimnasio')}
 ${choice}<form method="post" action="/settings/rules">
-<label for="tz">Zona horaria</label><select id="tz" name="tz"${tz.attributes}>${zone === undefined ? '<option value="" selected>Sin confirmar (se supone Europe/Madrid)</option>' : ''}${zones.map((entry) => `<option${entry === zone ? ' selected' : ''}>${e(entry)}</option>`).join('')}</select>
-${tz.text}<p class="hint">${zone ? 'La de la ciudad del gimnasio; con ella se interpretan las horas de las clases.' : 'Elige la de la ciudad del gimnasio y guárdala para poder reservar y cancelar desde el asistente.'}</p>
+<label for="tz">Zona horaria</label><select id="tz" name="tz"${tz.attributes}>${zones.map((entry) => (entry === zone ? `<option value="${e(entry)}" selected>${e(entry)}${confirmed ? '' : ' (sin confirmar)'}</option>` : `<option>${e(entry)}</option>`)).join('')}</select>
+${tz.text}<p class="hint">${confirmed ? 'La de la ciudad del gimnasio; con ella se interpretan las horas de las clases.' : 'Sin confirmar: se supone Europe/Madrid. Elige la de la ciudad del gimnasio y guarda las reglas para poder reservar y cancelar desde el asistente.'}</p>
 <label for="book">Apertura de reservas (días)</label><input id="book" name="book" type="number" inputmode="numeric" min="1" max="${maxBookingWindowDays}" value="${e(String(config.bookingWindowDays ?? ''))}" placeholder="Sin configurar"${book.attributes}>
 ${book.text}<p class="hint">Con cuántos días de antelación se abren las reservas de una clase.</p>
 <label for="cancel">Margen de cancelación (minutos)</label><input id="cancel" name="cancel" type="number" inputmode="numeric" min="1" max="${maxCancellationWindowMinutes}" value="${e(String(config.cancellationWindowMinutes ?? ''))}" placeholder="Sin configurar"${cancel.attributes}>

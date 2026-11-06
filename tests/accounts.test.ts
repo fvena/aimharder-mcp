@@ -236,7 +236,7 @@ test('each account edits its own plan, preferences and friends, and the connecto
   expect(page).toContain('<option value="tue|07:00|CROSS">07:00 · CROSS</option>');
   // Members start from their own settings only: the environment configures the owner's account.
   expect(page).toContain('<option value="" selected>Ninguna</option>');
-  expect(page).toContain('Sin confirmar (se supone Europe/Madrid)');
+  expect(page).toContain('Europe/Madrid (sin confirmar)');
   expect(page).not.toContain('Cambiar de gimnasio');
   expect(page).toContain('<script src="/assets/app.js" defer></script>');
   expect((await get('/assets/app.js')).headers.get('content-type')).toContain('text/javascript');
@@ -403,12 +403,11 @@ test('administration is for the owner only, and forms must come from this origin
 test('each account sets its own gym rules', async () => {
   const { cookie } = await joinAs(people.friend);
   const outcome = (message: string, field?: string) => `/settings?message=${message}&section=gimnasio${field ? `&field=${field}` : ''}#${field ?? 'gimnasio'}`;
-  // Until the account holder picks a zone it stays unconfirmed, even when other rules are saved.
-  expect(await (await get('/settings', cookie)).text()).toContain('<option value="" selected>Sin confirmar (se supone Europe/Madrid)</option>');
-  expect((await post('/settings/rules', { tz: '', book: '7', cancel: '' }, cookie)).headers.get('location')).toBe(outcome('saved'));
+  // An unconfirmed zone shows Europe/Madrid, marked as unconfirmed; saving the rules confirms the zone shown.
+  expect(await (await get('/settings', cookie)).text()).toContain('<option value="Europe/Madrid" selected>Europe/Madrid (sin confirmar)</option>');
   expect((await accountContext((await connect(people.friend)).accessToken!)).structuredContent).toMatchObject({ gym: { timeZoneStatus: 'assumed' } });
   expect((await post('/settings/rules', { tz: 'Europe/Madrid', book: '7', cancel: '90' }, cookie)).headers.get('location')).toBe(outcome('saved'));
-  expect(await (await get('/settings', cookie)).text()).not.toContain('Sin confirmar (se supone');
+  expect(await (await get('/settings', cookie)).text()).not.toContain('(sin confirmar)');
   expect((await post('/settings/rules', { tz: 'Mars/Olympus', book: '', cancel: '' }, cookie)).headers.get('location')).toBe(outcome('tz', 'tz'));
   expect((await post('/settings/rules', { tz: 'Europe/Madrid', book: '99', cancel: '' }, cookie)).headers.get('location')).toBe(outcome('book', 'book'));
   expect((await post('/settings/rules', { tz: 'Europe/Madrid', book: '', cancel: '1.5' }, cookie)).headers.get('location')).toBe(outcome('cancel', 'cancel'));

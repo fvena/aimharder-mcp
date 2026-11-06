@@ -246,7 +246,7 @@ The first message after a long pause can take a few seconds while your server wa
 Open `https://ana-aimharder.fly.dev/settings` and sign in with your AimHarder account. There you can change, without commands:
 
 - your **gym**, if your AimHarder account belongs to several: the assistant uses only the one you choose. Changing it later clears your other settings, since they belong to the previous gym,
-- your gym's **time zone** and its booking and cancellation windows. Pick the time zone from the list and save it once to confirm it: bookings need it,
+- your gym's **time zone** and its booking and cancellation windows. Until you save it, the time zone shows `Europe/Madrid (sin confirmar)`: pick yours if it's another one and save once to confirm it, since bookings need it,
 - your **weekly booking plan**: pick a day and one of that day's classes, then **Añadir al plan**. You can add several classes on the same day and remove any of them,
 - the class whose workout you mean by "today's workout",
 - whether "who's in this class?" shows everyone or only your friends,
