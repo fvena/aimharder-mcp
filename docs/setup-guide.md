@@ -141,7 +141,7 @@ Add any of these lines if you want them.
 | `AIMHARDER_BOOKING_WINDOW_DAYS=7` | Your gym opens bookings 7 days ahead. The assistant then won't try to book too early. |
 | `AIMHARDER_CANCELLATION_WINDOW_MINUTES=90` | Cancelling less than 90 minutes before a class may cost a credit. The assistant warns you. |
 | `AIMHARDER_WORKOUT_CLASS=CROSS` | The class whose workout you mean when you ask "what's today's workout?". Use the exact name shown in AimHarder. |
-| `AIMHARDER_REQUIRE_BOOKING_CONFIRMATION=false` | Book without a confirmation step when you name an exact class. Cancelling and saving results always ask. The default, `true`, always asks. |
+| `AIMHARDER_REQUIRE_BOOKING_CONFIRMATION=false` | Book without a confirmation step when you name an exact class. Cancelling and saving results always ask. The default, `true`, always asks. Choosing another gym on the settings page sets it back to `true`. |
 
 [Configuration](configuration.md) explains every setting in detail.
 
@@ -246,7 +246,7 @@ The first message after a long pause can take a few seconds while your server wa
 Open `https://ana-aimharder.fly.dev/settings` and sign in with your AimHarder account. There you can change, without commands:
 
 - your **gym**, if your AimHarder account belongs to several: the assistant uses only the one you choose. Changing it later clears your other settings, since they belong to the previous gym,
-- your gym's **time zone** and its booking and cancellation windows. Save the time zone once to confirm it: bookings need it,
+- your gym's **time zone** and its booking and cancellation windows. Pick the time zone from the list and save it once to confirm it: bookings need it,
 - your **weekly booking plan**: pick a day and one of that day's classes, then **Añadir al plan**. You can add several classes on the same day and remove any of them,
 - the class whose workout you mean by "today's workout",
 - whether "who's in this class?" shows everyone or only your friends,

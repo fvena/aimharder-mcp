@@ -7,8 +7,15 @@ export const timeZoneSchema = z.string().regex(/^[A-Za-z][A-Za-z0-9_+\-/]*$/).re
   try { new Intl.DateTimeFormat('en', { timeZone: zone }); return true; }
   catch { return false; }
 });
-const bookingWindowSchema = z.number().int().min(1).max(60);
-const cancellationWindowSchema = z.number().int().min(1).max(10_080);
+export const maxBookingWindowDays = 60;
+export const maxCancellationWindowMinutes = 10_080;
+export const bookingWindowSchema = z.number().int().min(1).max(maxBookingWindowDays);
+export const cancellationWindowSchema = z.number().int().min(1).max(maxCancellationWindowMinutes);
+/** A whole number written as text (as in the environment or a form), checked with a schema; undefined when invalid. */
+export function wholeNumber(value: string, schema: z.ZodType<number>): number | undefined {
+  const parsed = /^\d{1,6}$/.test(value.trim()) ? schema.safeParse(Number(value.trim())) : undefined;
+  return parsed?.success ? parsed.data : undefined;
+}
 const className = z.string().trim().min(1).max(300);
 export const weekdays = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'] as const;
 export type Weekday = typeof weekdays[number];
@@ -44,9 +51,9 @@ function jsonSetting<T>(value: string | undefined, schema: z.ZodType<T>, fallbac
 /** Parse an optional whole-number environment value with a schema, or fail with one public error code. */
 function numberSetting(value: string | undefined, schema: z.ZodType<number>, code: ConstructorParameters<typeof AimHarderError>[0]): number | undefined {
   if (value === undefined) return undefined;
-  const parsed = /^\d{1,6}$/.test(value.trim()) ? schema.safeParse(Number(value.trim())) : undefined;
-  if (!parsed?.success) throw new AimHarderError(code);
-  return parsed.data;
+  const parsed = wholeNumber(value, schema);
+  if (parsed === undefined) throw new AimHarderError(code);
+  return parsed;
 }
 const environmentSchema = z.object({
   AIMHARDER_USERNAME: nonEmpty,
@@ -126,8 +133,19 @@ export const userSettingsSchema = z.object({
   bookingPlan: bookingPlanSchema.optional(),
   participantsFilter: z.enum(participantsFilterValues).optional(),
   friends: friendsSchema.optional(),
+  /** Set back to true (the default) when the account chooses another gym; not edited on the settings page. */
+  requireBookingConfirmation: z.boolean().optional(),
 }).strict();
 export type UserSettings = z.infer<typeof userSettingsSchema>;
+
+/**
+ * The settings of an account that has just chosen another gym: every other setting cleared, the environment's included,
+ * because they all refer to the previous gym. A setting added to `userSettingsSchema` belongs here too.
+ */
+export const newGymSettings = (gym: string): UserSettings => ({
+  gym, timeZone: null, bookingWindowDays: null, cancellationWindowMinutes: null, workoutClass: null, bookingPlan: [],
+  participantsFilter: 'all', friends: {}, requireBookingConfirmation: true,
+});
 
 /** Layer the account's own settings over a configuration; null clears a value. */
 export function applySettings(base: Configuration, user: UserSettings): Configuration {
@@ -138,10 +156,11 @@ export function applySettings(base: Configuration, user: UserSettings): Configur
     timeZone: value(user.timeZone, base.timeZone),
     bookingWindowDays: value(user.bookingWindowDays, base.bookingWindowDays),
     cancellationWindowMinutes: value(user.cancellationWindowMinutes, base.cancellationWindowMinutes),
-    workoutClass: user.workoutClass === undefined ? base.workoutClass : user.workoutClass,
+    workoutClass: value(user.workoutClass, base.workoutClass),
     bookingPlan: value(user.bookingPlan, base.bookingPlan),
     participantsFilter: value(user.participantsFilter, base.participantsFilter),
     friends: value(user.friends, base.friends),
+    requireBookingConfirmation: value(user.requireBookingConfirmation, base.requireBookingConfirmation),
   };
 }
 

@@ -1,5 +1,5 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
-import { applySettings, sortPlan, userSettingsSchema, type BookingPlan, type Configuration, type Friends, type ParticipantsFilterValue, type PlanEntry, type UserSettings } from './config.js';
+import { applySettings, newGymSettings, sortPlan, userSettingsSchema, type BookingPlan, type Configuration, type Friends, type ParticipantsFilterValue, type PlanEntry, type UserSettings } from './config.js';
 import { AimHarderError } from './errors.js';
 import { createContext, type Context } from './features/context.js';
 import { memberScope, ownerScope, type Member, type Store } from './store.js';
@@ -82,13 +82,10 @@ export class Accounts {
 
   /**
    * Choose the account's gym (one of its gyms; the caller checks which it has). Choosing another gym clears every other
-   * setting, the environment's included, since they all refer to the previous gym: plan, workout class, time zone, booking
-   * and cancellation windows, participants filter and friends.
+   * setting (see `newGymSettings`).
    */
   chooseGym(sub: string, gymId: string) {
-    this.#change(sub, (own, current) => (current.gym === gymId ? own : {
-      gym: gymId, timeZone: null, bookingWindowDays: null, cancellationWindowMinutes: null, workoutClass: null, bookingPlan: [], participantsFilter: 'all', friends: {},
-    }));
+    this.#change(sub, (own, current) => (current.gym === gymId ? own : newGymSettings(gymId)));
   }
 
   /** Add a class to the weekly plan, in weekday and start-time order, without duplicates. */

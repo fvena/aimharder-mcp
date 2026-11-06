@@ -1,5 +1,5 @@
 import express, { type NextFunction, type Request, type RequestHandler, type Response } from 'express';
-import { gymIdSchema, timeZoneSchema, weekdays, type Friends, type HttpConfiguration, type Weekday } from '../config.js';
+import { bookingWindowSchema, cancellationWindowSchema, gymIdSchema, maxBookingWindowDays, maxCancellationWindowMinutes, timeZoneSchema, wholeNumber, weekdays, type Friends, type HttpConfiguration, type Weekday } from '../config.js';
 import { type Accounts } from '../accounts.js';
 import { getClassParticipants, getClassSessions } from '../features/schedule.js';
 import type { Context } from '../features/context.js';
@@ -290,21 +290,22 @@ ${gym ? '' : '<option value="" selected disabled>Elige tu gimnasio</option>'}${g
 <div class="btn-row"><button type="submit"${gym ? '' : ' class="primary"'}>${gym ? 'Cambiar de gimnasio' : 'Elegir gimnasio'}</button></div></form>` : '';
     if (!gym) {
       layout(res, 200, 'Ajustes', 'settings', `<h1>Ajustes</h1><section id="gimnasio"><h2>Tu gimnasio</h2>${notice(req, 'gimnasio')}
-${gone ? '<p class="notice error" role="alert">Tu gimnasio ya no aparece en tu cuenta de AimHarder. Elige otro para seguir usando el asistente.</p>' : '<p class="lead">Elige el gimnasio que quieres usar con el asistente. Hasta entonces no puede consultar ni reservar nada.</p>'}
+${gone ? '<p class="notice error" role="alert">Tu gimnasio ya no está disponible: elige otro.</p>' : '<p class="lead">Elige el gimnasio que quieres usar con el asistente. Hasta entonces no puede consultar ni reservar nada.</p>'}
 ${choice}</section>`);
       return;
     }
     const timetable = await timetableOf(sub, ctx, gym);
     const [tz, book, cancel] = [fieldError(req, 'tz'), fieldError(req, 'book'), fieldError(req, 'cancel')];
-    const zone = config.timeZone ?? 'Europe/Madrid';
-    const zones = timeZones.includes(zone) ? timeZones : [zone, ...timeZones];
+    // An unconfirmed zone stays so until the account holder picks one: saving the other rules does not confirm it.
+    const zone = config.timeZone;
+    const zones = zone === undefined || timeZones.includes(zone) ? timeZones : [zone, ...timeZones];
     const gymSection = `<section id="gimnasio"><h2>Tu gimnasio</h2><p class="lead">${gyms.length > 1 ? 'El que usa el asistente y sus reglas.' : `${e(gym.name)}. Sus reglas, tal como las conoces.`}</p>${notice(req, 'gimnasio')}
 ${choice}<form method="post" action="/settings/rules">
-<label for="tz">Zona horaria</label><select id="tz" name="tz"${tz.attributes}>${zones.map((entry) => `<option${entry === zone ? ' selected' : ''}>${e(entry)}</option>`).join('')}</select>
-${tz.text}<p class="hint">${config.timeZone ? 'La de la ciudad del gimnasio; con ella se interpretan las horas de las clases.' : 'Sin confirmar: se supone Europe/Madrid. Guárdala para poder reservar y cancelar desde el asistente.'}</p>
-<label for="book">Apertura de reservas (días)</label><input id="book" name="book" type="number" inputmode="numeric" min="1" max="60" value="${e(String(config.bookingWindowDays ?? ''))}" placeholder="Sin configurar"${book.attributes}>
+<label for="tz">Zona horaria</label><select id="tz" name="tz"${tz.attributes}>${zone === undefined ? '<option value="" selected>Sin confirmar (se supone Europe/Madrid)</option>' : ''}${zones.map((entry) => `<option${entry === zone ? ' selected' : ''}>${e(entry)}</option>`).join('')}</select>
+${tz.text}<p class="hint">${zone ? 'La de la ciudad del gimnasio; con ella se interpretan las horas de las clases.' : 'Elige la de la ciudad del gimnasio y guárdala para poder reservar y cancelar desde el asistente.'}</p>
+<label for="book">Apertura de reservas (días)</label><input id="book" name="book" type="number" inputmode="numeric" min="1" max="${maxBookingWindowDays}" value="${e(String(config.bookingWindowDays ?? ''))}" placeholder="Sin configurar"${book.attributes}>
 ${book.text}<p class="hint">Con cuántos días de antelación se abren las reservas de una clase.</p>
-<label for="cancel">Margen de cancelación (minutos)</label><input id="cancel" name="cancel" type="number" inputmode="numeric" min="1" max="10080" value="${e(String(config.cancellationWindowMinutes ?? ''))}" placeholder="Sin configurar"${cancel.attributes}>
+<label for="cancel">Margen de cancelación (minutos)</label><input id="cancel" name="cancel" type="number" inputmode="numeric" min="1" max="${maxCancellationWindowMinutes}" value="${e(String(config.cancellationWindowMinutes ?? ''))}" placeholder="Sin configurar"${cancel.attributes}>
 ${cancel.text}<p class="hint">Cuántos minutos antes de la clase cancelar puede costar el crédito.</p>
 <div class="btn-row"><button type="submit">Guardar reglas</button></div></form></section>`;
     const entries = config.bookingPlan;
@@ -380,14 +381,15 @@ ${calendar}`);
     const sub = res.locals.sub as string;
     const body = req.body as Body;
     const [timeZone, book, cancel] = [field(body, 'tz'), field(body, 'book'), field(body, 'cancel')];
-    const whole = (value: string, max: number) => (value === '' ? null : /^\d{1,5}$/.test(value) && Number(value) >= 1 && Number(value) <= max ? Number(value) : undefined);
+    // An empty window means none; an empty zone leaves it unconfirmed.
+    const window = (value: string, schema: typeof bookingWindowSchema) => (value === '' ? null : wholeNumber(value, schema));
     // Check each value on its own, to point at the field that is wrong.
-    if (!timeZoneSchema.safeParse(timeZone).success) { back(res, '/settings', 'gimnasio', 'tz', 'tz'); return; }
-    const bookingWindowDays = whole(book, 60);
+    if (timeZone !== '' && !timeZoneSchema.safeParse(timeZone).success) { back(res, '/settings', 'gimnasio', 'tz', 'tz'); return; }
+    const bookingWindowDays = window(book, bookingWindowSchema);
     if (bookingWindowDays === undefined) { back(res, '/settings', 'gimnasio', 'book', 'book'); return; }
-    const cancellationWindowMinutes = whole(cancel, 10_080);
+    const cancellationWindowMinutes = window(cancel, cancellationWindowSchema);
     if (cancellationWindowMinutes === undefined) { back(res, '/settings', 'gimnasio', 'cancel', 'cancel'); return; }
-    save(res, 'gimnasio', () => accounts.setGymRules(sub, { timeZone, bookingWindowDays, cancellationWindowMinutes }));
+    save(res, 'gimnasio', () => accounts.setGymRules(sub, { ...(timeZone ? { timeZone } : {}), bookingWindowDays, cancellationWindowMinutes }));
   });
 
   router.post('/settings/preferences', sameOrigin, signedIn, form, (req, res) => {

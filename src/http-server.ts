@@ -8,13 +8,11 @@ import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from '@modelconte
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import { Accounts, ownerSub } from './accounts.js';
 import { readConfiguration, readHttpConfiguration } from './config.js';
-import { upcomingBookingsCalendar } from './features/calendar.js';
+import { CalendarFeeds, calendarCacheSeconds, matchesTag } from './features/calendar.js';
 import { AccountsOAuthProvider, sendApprovalPage } from './oauth.js';
 import { createServerForContext } from './server.js';
 import { Store } from './store.js';
 import { webRouter } from './web/routes.js';
-
-const calendarCacheMs = 5 * 60 * 1000;
 
 /** Keys derived from MCP_OWNER_SECRET: one signs OAuth and session tokens, the other encrypts members' credentials. */
 function deriveKey(secret: string, purpose: string) {
@@ -79,27 +77,18 @@ export function createHttpApp(environment: Record<string, string | undefined>) {
     windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false,
     handler: (_req, res) => { res.status(429).set('Retry-After', '900').type('text/plain; charset=utf-8').send('Too many requests.'); },
   });
-  const feeds = new Map<string, { at: number; feed: Promise<Awaited<ReturnType<typeof upcomingBookingsCalendar>>> }>();
+  const feeds = new CalendarFeeds();
   app.get('/calendar/:file', feedLimit, async (req, res) => {
     const file = String(req.params.file);
     const sub = file.endsWith('.ics') ? accounts.calendarFeedAccount(file.slice(0, -'.ics'.length)) : undefined;
     const ctx = sub === undefined ? undefined : accounts.context(sub);
     res.set('Cache-Control', 'private, no-store').set('X-Robots-Tag', 'noindex').set('Referrer-Policy', 'no-referrer');
     if (sub === undefined || !ctx) { res.status(404).type('text/plain; charset=utf-8').send('Not found.'); return; }
-    let cached = feeds.get(sub);
-    if (!cached || Date.now() - cached.at >= calendarCacheMs) {
-      cached = { at: Date.now(), feed: upcomingBookingsCalendar(ctx) };
-      feeds.set(sub, cached);
-      cached.feed.catch(() => { if (feeds.get(sub) === cached) feeds.delete(sub); });
-    }
     let feed;
-    try { feed = await cached.feed; }
-    catch { res.status(503).set('Retry-After', '300').type('text/plain; charset=utf-8').send('AimHarder could not be read. Try again later.'); return; }
-    res.set('Cache-Control', `private, max-age=${calendarCacheMs / 1000}`).set('ETag', feed.etag);
-    // Compared here rather than with req.fresh, which ignores If-None-Match when the request says no-cache, as fetch()
-    // does for every conditional request.
-    const matches = (req.get('if-none-match') ?? '').split(',').map((tag) => tag.trim().replace(/^W\//, ''));
-    if (matches.includes(feed.etag) || matches.includes('*')) { res.status(304).end(); return; }
+    try { feed = await feeds.read(sub, ctx); }
+    catch { res.status(503).set('Retry-After', String(calendarCacheSeconds)).type('text/plain; charset=utf-8').send('AimHarder could not be read. Try again later.'); return; }
+    res.set('Cache-Control', `private, max-age=${calendarCacheSeconds}`).set('ETag', feed.etag);
+    if (matchesTag(req.get('if-none-match'), feed.etag)) { res.status(304).end(); return; }
     res.type('text/calendar; charset=utf-8').send(feed.body);
   });
   app.use(webRouter(config, accounts, provider, signInLimit));

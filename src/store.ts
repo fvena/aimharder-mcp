@@ -39,9 +39,7 @@ export class Store {
         ${calendarFeedsTable}
         PRAGMA user_version = 4;`);
     } else if (version >= 1 && version <= 3) {
-      // Version 2 changed the booking plan, friends and participant filter formats: personal settings start over.
-      if (version === 1) this.#db.exec("DELETE FROM settings WHERE scope <> 'gym';");
-      if (version < 3) this.#migrateToOneGym();
+      if (version < 3) this.#migrateToOneGym(version === 1);
       // Version 4 added calendar feed links.
       this.#db.exec(`${calendarFeedsTable} PRAGMA user_version = 4;`);
     } else if (version !== 4) {
@@ -51,10 +49,12 @@ export class Store {
 
   /**
    * Version 3: each account uses one gym and keeps its rules itself. Each account's settings keep what applied at its gym
-   * (its default gym, else the only gym the stored settings name): the shared gym rules (time zone, booking and
-   * cancellation windows) and its own workout class and plan there. The shared gym rules and active gyms are dropped.
+   * (its default gym, else the only gym the server used or the stored settings name): the shared gym rules (time zone,
+   * booking and cancellation windows) and its own workout class and plan there. Only a default gym is kept as the chosen
+   * one. The shared gym rules and active gyms are dropped. From version 1, whose booking plan, friends and participant
+   * filter formats version 2 changed, personal settings start over first.
    */
-  #migrateToOneGym() {
+  #migrateToOneGym(fromVersion1: boolean) {
     const record = (value: unknown): Record<string, unknown> => (value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {});
     const read = (scope: string) => {
       const row = this.#db.prepare('SELECT value FROM settings WHERE scope = ?').get(scope) as { value: string } | undefined;
@@ -65,6 +65,7 @@ export class Store {
       ...(this.#db.prepare("SELECT scope FROM settings WHERE scope <> 'gym'").all() as { scope: string }[]).map((row) => row.scope)]);
     this.#db.exec('BEGIN');
     try {
+      if (fromVersion1) this.#db.exec("DELETE FROM settings WHERE scope <> 'gym';");
       for (const scope of scopes) {
         const own = read(scope);
         const keyed = [own.workoutClasses, own.bookingPlans, rules.gymTimeZones, rules.bookingWindowDays, rules.cancellationWindowMinutes].map(record);
@@ -74,7 +75,7 @@ export class Store {
           : active.length === 1 ? active[0] : named.size === 1 ? [...named][0] : undefined;
         const at = (values: Record<string, unknown>) => (typeof gym === 'string' && Object.hasOwn(values, gym) ? values[gym] : undefined);
         const [workoutClass, bookingPlan, timeZone, bookingWindowDays, cancellationWindowMinutes] = keyed.map(at);
-        const candidate = { gym, timeZone, bookingWindowDays, cancellationWindowMinutes, workoutClass, bookingPlan, participantsFilter: own.participantsFilter, friends: own.friends };
+        const candidate = { gym: own.defaultGym, timeZone, bookingWindowDays, cancellationWindowMinutes, workoutClass, bookingPlan, participantsFilter: own.participantsFilter, friends: own.friends };
         // Keep each value that is still valid on its own.
         const next = Object.fromEntries(Object.entries(candidate).filter(([key, value]) => value !== undefined && userSettingsSchema.safeParse({ [key]: value }).success));
         if (Object.keys(next).length) this.saveSettings(scope, userSettingsSchema.parse(next));

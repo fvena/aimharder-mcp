@@ -56,7 +56,7 @@ fly scale count 1
 
 #### Upgrading a deployment from before accounts
 
-Earlier versions stored nothing and approved connections with the owner secret. (Data files of earlier multi-account versions are upgraded on start. Members and invitations stay. Each account keeps what applied at its gym: its default gym, else the only gym its settings name, with that gym's rules from `/admin` (time zone, windows), workout class and plan. The shared gym rules and active gyms are dropped. Personal settings in the formats of the first multi-account version are cleared, to be entered again on the settings page.) To upgrade, create the volume once, then deploy:
+Earlier versions stored nothing and approved connections with the owner secret. (Data files of earlier multi-account versions are upgraded on start. Members and invitations stay. Each account keeps what applied at its gym: its default gym, else the only gym its settings name, with that gym's rules from `/admin` (time zone, windows), workout class and plan. The shared gym rules and active gyms are dropped, and members no longer inherit the environment's workout class: they set their own. Personal settings in the formats of the first multi-account version are cleared, to be entered again on the settings page.) To upgrade, create the volume once, then deploy:
 
 ```sh
 fly volumes create aimharder_data --region ams --size 1 -a <app>

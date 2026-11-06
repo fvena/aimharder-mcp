@@ -212,6 +212,8 @@ test('reads AimHarder at most every few minutes and answers unchanged feeds with
   const reads = nextBookingsAccounts.length;
   const again = await fetch(`${base}${path}`, { headers: { 'If-None-Match': etag! } });
   expect(again.status).toBe(304);
+  for (const header of [`W/${etag}`, `"other", ${etag}`, '*']) expect((await fetch(`${base}${path}`, { headers: { 'If-None-Match': header } })).status).toBe(304);
+  expect((await fetch(`${base}${path}`, { headers: { 'If-None-Match': '"other"' } })).status).toBe(200);
   expect(nextBookingsAccounts.length).toBe(reads);
 
   // After a restart the feed is read again; the same bookings give the same tag.
@@ -283,9 +285,13 @@ test('the calendar section and link wait until an account with several gyms choo
   expect((await post('/settings/calendar', {}, cookie)).headers.get('location')).toBe('/settings#gimnasio');
   await post('/settings/gym', { gym: 'sample-gym' }, cookie);
   const path = await createLink(cookie);
-  expect((await get(path)).status).toBe(200);
+  expect(await (await get(path)).text()).toContain('LOCATION:Box Norte\\, Sala 1');
+  // The link belongs to the account: after choosing another gym it lists that gym's bookings.
+  await post('/settings/gym', { gym: 'other-gym' }, cookie);
+  await restart();
+  expect(await (await get(path)).text()).toContain('LOCATION:Otro box');
   // A chosen gym that is no longer the account's is an error, never an empty calendar.
-  roles = [{ ...gym, centre_url: 'other-gym.aimharder.es', boid: 300 }];
+  roles = [gym];
   await restart();
   expect((await get(path)).status).toBe(503);
 });

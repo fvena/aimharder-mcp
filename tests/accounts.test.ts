@@ -90,8 +90,8 @@ function freePort() {
   });
 }
 
-async function start() {
-  const { app, config, close } = createHttpApp({
+async function start(extra: Record<string, string> = {}) {
+  const { app, config, close } = createHttpApp({ ...extra,
     AIMHARDER_USERNAME: people.owner.username, AIMHARDER_PASSWORD: people.owner.password,
     AIMHARDER_BOOKING_PLAN: '[{"day":"mon","className":"CROSS","startTime":"07:00"}]',
     AIMHARDER_WORKOUT_CLASS: 'CROSS',
@@ -236,7 +236,7 @@ test('each account edits its own plan, preferences and friends, and the connecto
   expect(page).toContain('<option value="tue|07:00|CROSS">07:00 · CROSS</option>');
   // Members start from their own settings only: the environment configures the owner's account.
   expect(page).toContain('<option value="" selected>Ninguna</option>');
-  expect(page).toContain('Sin confirmar: se supone Europe/Madrid');
+  expect(page).toContain('Sin confirmar (se supone Europe/Madrid)');
   expect(page).not.toContain('Cambiar de gimnasio');
   expect(page).toContain('<script src="/assets/app.js" defer></script>');
   expect((await get('/assets/app.js')).headers.get('content-type')).toContain('text/javascript');
@@ -307,11 +307,22 @@ test('an account with several gyms chooses one, and choosing another clears its 
   // A chosen gym that is no longer the account's asks for another.
   ownerRoles = [sampleGym];
   expect(JSON.stringify(await accountContext(connection.accessToken!))).toContain('GYM_NOT_ACCESSIBLE');
-  expect(await (await get('/settings', owner)).text()).toContain('Tu gimnasio ya no aparece en tu cuenta');
+  expect(await (await get('/settings', owner)).text()).toContain('Tu gimnasio ya no está disponible: elige otro.');
 
   // Administration no longer manages gyms.
   expect(await (await get('/admin', owner)).text()).not.toContain('Gimnasios');
   expect((await post('/admin/gyms', { gym: 'sample-gym' }, owner)).status).toBe(404);
+});
+
+test('choosing another gym also sets booking confirmation back to its default', async () => {
+  ownerRoles = [sampleGym, oldGym];
+  await stopAll();
+  await start({ AIMHARDER_GYM: 'sample-gym', AIMHARDER_REQUIRE_BOOKING_CONFIRMATION: 'false' });
+  const owner = await signIn(people.owner);
+  const connection = await connect(people.owner);
+  expect((await accountContext(connection.accessToken!)).structuredContent).toMatchObject({ writeConfirmationPolicy: { bookingCreation: false } });
+  await post('/settings/gym', { gym: 'old-gym' }, owner);
+  expect((await accountContext(connection.accessToken!)).structuredContent).toMatchObject({ gym: { id: 'old-gym' }, writeConfirmationPolicy: { bookingCreation: true } });
 });
 
 test('a data file of version 2 keeps what applied at each account\'s gym', async () => {
@@ -392,7 +403,12 @@ test('administration is for the owner only, and forms must come from this origin
 test('each account sets its own gym rules', async () => {
   const { cookie } = await joinAs(people.friend);
   const outcome = (message: string, field?: string) => `/settings?message=${message}&section=gimnasio${field ? `&field=${field}` : ''}#${field ?? 'gimnasio'}`;
+  // Until the account holder picks a zone it stays unconfirmed, even when other rules are saved.
+  expect(await (await get('/settings', cookie)).text()).toContain('<option value="" selected>Sin confirmar (se supone Europe/Madrid)</option>');
+  expect((await post('/settings/rules', { tz: '', book: '7', cancel: '' }, cookie)).headers.get('location')).toBe(outcome('saved'));
+  expect((await accountContext((await connect(people.friend)).accessToken!)).structuredContent).toMatchObject({ gym: { timeZoneStatus: 'assumed' } });
   expect((await post('/settings/rules', { tz: 'Europe/Madrid', book: '7', cancel: '90' }, cookie)).headers.get('location')).toBe(outcome('saved'));
+  expect(await (await get('/settings', cookie)).text()).not.toContain('Sin confirmar (se supone');
   expect((await post('/settings/rules', { tz: 'Mars/Olympus', book: '', cancel: '' }, cookie)).headers.get('location')).toBe(outcome('tz', 'tz'));
   expect((await post('/settings/rules', { tz: 'Europe/Madrid', book: '99', cancel: '' }, cookie)).headers.get('location')).toBe(outcome('book', 'book'));
   expect((await post('/settings/rules', { tz: 'Europe/Madrid', book: '', cancel: '1.5' }, cookie)).headers.get('location')).toBe(outcome('cancel', 'cancel'));

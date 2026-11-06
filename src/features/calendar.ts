@@ -4,7 +4,7 @@ import { getUpcomingBookings } from './bookings.js';
 import type { Context } from './context.js';
 
 /** One upcoming booking as a calendar event, with its start and end as UTC instants (milliseconds). */
-export interface BookingEvent {
+interface BookingEvent {
   uid: string;
   gym: Gym;
   className: string;
@@ -21,7 +21,7 @@ export interface BookingEvent {
  * subscribers update it in place. Gym-local wall times become UTC instants through the gym's zone. A gym that cannot be
  * read fails the whole feed: an empty feed would make subscribers delete the bookings they have.
  */
-export async function upcomingBookingsCalendar(ctx: Context, now = new Date()) {
+async function upcomingBookingsCalendar(ctx: Context, now = new Date()) {
   const { gym, bookings } = await getUpcomingBookings(ctx);
   const events: BookingEvent[] = bookings.map((booking) => {
     const endTime = booking.timeLabel.slice(-5);
@@ -38,11 +38,45 @@ export async function upcomingBookingsCalendar(ctx: Context, now = new Date()) {
   return { body: icalendar(events, now), etag, events };
 }
 
+type Feed = Awaited<ReturnType<typeof upcomingBookingsCalendar>>;
+
+/** How long an account's feed is kept before AimHarder is read again, in seconds; also the feed's `max-age`. */
+export const calendarCacheSeconds = 300;
+
+/**
+ * Each account's calendar feed, read from AimHarder at most every `calendarCacheSeconds`. Concurrent requests share one
+ * read, and a failed read is not kept, so the next request reads again.
+ */
+export class CalendarFeeds {
+  readonly #feeds = new Map<string, { at: number; feed: Promise<Feed> }>();
+
+  read(sub: string, ctx: Context): Promise<Feed> {
+    let cached = this.#feeds.get(sub);
+    if (!cached || Date.now() - cached.at >= calendarCacheSeconds * 1000) {
+      const entry = { at: Date.now(), feed: upcomingBookingsCalendar(ctx) };
+      this.#feeds.set(sub, entry);
+      entry.feed.catch(() => { if (this.#feeds.get(sub) === entry) this.#feeds.delete(sub); });
+      cached = entry;
+    }
+    return cached.feed;
+  }
+}
+
+/**
+ * Whether an `If-None-Match` header matches a feed's tag: `*`, or any listed tag, weak or strong (RFC 9110 weak
+ * comparison). Compared here rather than with Express's `req.fresh`, which ignores the header when the request says
+ * `no-cache`, as `fetch()` does for every conditional request.
+ */
+export function matchesTag(header: string | undefined, etag: string) {
+  const tags = (header ?? '').split(',').map((tag) => tag.trim().replace(/^W\//, ''));
+  return tags.includes('*') || tags.includes(etag);
+}
+
 /** What each booking state says as an event status: only what AimHarder states, so another state has none. */
 const statuses = { booked: 'CONFIRMED', waitlisted: 'TENTATIVE', unknown: undefined } as const;
 
 /** Serialize events as an iCalendar object, with CRLF line endings and lines folded at 75 octets. */
-export function icalendar(events: BookingEvent[], now: Date) {
+function icalendar(events: BookingEvent[], now: Date) {
   const lines = [
     'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//aimharder-mcp//Reservas//ES', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH',
     'X-WR-CALNAME:AimHarder', 'X-PUBLISHED-TTL:PT1H', 'REFRESH-INTERVAL;VALUE=DURATION:PT1H',
