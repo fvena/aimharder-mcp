@@ -59,7 +59,7 @@ afterAll(() => upstream.close());
 
 async function connect(extra: Record<string, string> = {}) {
   const server = createServer({ AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic-password',
-    AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid"}', ...extra });
+    AIMHARDER_TIME_ZONE: 'Europe/Madrid', ...extra });
   const client = new Client({ name: 'app-api-test', version: '1.0.0' });
   const [a, b] = InMemoryTransport.createLinkedPair();
   connections.push({ client, server });

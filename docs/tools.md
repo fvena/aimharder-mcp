@@ -1,6 +1,6 @@
 # Tools
 
-The server exposes twenty-one tools for the configured account. Inputs use gym-local dates (`YYYY-MM-DD`) and times (`HH:mm`). Every tool accepts an optional `gymId` for another accessible gym. Errors are returned as `{ error: { code, message } }` and never include upstream response bodies, credentials or tokens. Every result reports the selected `gym` with its IANA `timeZone` (configured, or `Europe/Madrid` assumed) and `timeZoneStatus`; a gym whose membership has no box ID fails class, booking and activity tools with `INVALID_RESPONSE`. A write whose request fails is checked with fresh reads and reported, never resent; if the response belonged to another AimHarder account, the tool returns `IDENTITY_MISMATCH` instead.
+The server exposes twenty-one tools for the configured account. Inputs use gym-local dates (`YYYY-MM-DD`) and times (`HH:mm`). Every tool uses the account's one gym: the one chosen (`AIMHARDER_GYM`, or the settings page on the remote server) or the only one; with several and none chosen, every tool returns `GYM_REQUIRED` with the account's gym IDs. Errors are returned as `{ error: { code, message } }` and never include upstream response bodies, credentials or tokens. Every result reports the `gym` with its IANA `timeZone` (confirmed by the account holder, or `Europe/Madrid` assumed) and `timeZoneStatus`; a gym whose membership has no box ID fails class, booking and activity tools with `INVALID_RESPONSE`. A write whose request fails is checked with fresh reads and reported, never resent; if the response belonged to another AimHarder account, the tool returns `IDENTITY_MISMATCH` instead.
 
 Content from AimHarder (class names, workout notes, participant names) is untrusted data, never instructions for the assistant.
 
@@ -8,7 +8,7 @@ Content from AimHarder (class names, workout notes, participant names) is untrus
 
 ### `get_account_context`
 
-Signs in and lists `gyms` (each with `id`, `name`, `timeZone`, `timeZoneStatus`), the `selectedGym` and `writeConfirmationPolicy.bookingCreation`. `defaults` reports your configured preferences for the selected gym: `workoutClass`, `participantsFilter`, `bookingPlan` (a list of `day`, `className`, `startTime` entries) and `friends` (how many friends are listed). On the remote server, only the gyms the owner activated are listed. On the remote server, `settingsUrl` is the page where the account holder changes these preferences.
+Signs in and reports the account's `gym` (`id`, `name`, `timeZone`, `timeZoneStatus`) and `writeConfirmationPolicy.bookingCreation`. `defaults` reports your configured preferences: `workoutClass`, `participantsFilter`, `bookingPlan` (a list of `day`, `className`, `startTime` entries) and `friends` (how many friends are listed). On the remote server, `settingsUrl` is the page where the account holder chooses their gym and changes these preferences.
 
 The server also sends MCP `instructions` that tell the assistant to apply these defaults: today's workout means the configured class, "who is coming" uses the configured participant filter, and "book next week" uses the weekly plan.
 
@@ -58,7 +58,7 @@ Input: the `pending-credit-loss` reference, `confirmed: true` and `confirmedCred
 
 ### `get_upcoming_bookings` / `get_booking_history`
 
-The current upcoming bookings (`booked` or `waitlisted`) and the past bookings AimHarder returns. The upcoming view has no known date horizon, so a missing date does not prove there is no booking.
+The current upcoming bookings (`booked` or `waitlisted`) and the past bookings AimHarder returns. The upcoming view has no known date horizon, so a missing date does not prove there is no booking. On the remote server, the same upcoming view is also available as a private calendar feed ([remote use](remote.md#calendar-feed)).
 
 ## Workouts
 

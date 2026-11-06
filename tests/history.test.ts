@@ -37,7 +37,7 @@ afterAll(() => upstream.close());
 async function connect(extra: Record<string, string | undefined> = {}) {
   const server = createServer({
     AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic-password',
-    AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid"}', ...extra,
+    AIMHARDER_TIME_ZONE: 'Europe/Madrid', ...extra,
   });
   const client = new Client({ name: 'booking-behavioral-harness', version: '1.0.0' });
   const [a, b] = InMemoryTransport.createLinkedPair();
@@ -88,7 +88,7 @@ test('rejects unknown pagination instead of asserting coverage', async () => {
   respond([], { nextPage: 2 }); expect((await query(await connect())).isError).toBe(true);
 });
 test('uses an assumed timezone and rejects foreign gym and family selectors', async () => {
-  expect((await query(await connect({ AIMHARDER_GYM_TIME_ZONES: undefined }))).structuredContent).toMatchObject({ gym: { timeZone: 'Europe/Madrid', timeZoneStatus: 'assumed' } });
+  expect((await query(await connect({ AIMHARDER_TIME_ZONE: undefined }))).structuredContent).toMatchObject({ gym: { timeZone: 'Europe/Madrid', timeZoneStatus: 'assumed' } });
   const client = await connect();
   expect((await query(client, { gymId: 'foreign' })).isError).toBe(true);
   expect((await query(client, { familyId: 2 })).isError).toBe(true);

@@ -1,7 +1,6 @@
-import { gymIdSchema } from '../config.js';
 import { dateSchema } from '../domain/classes.js';
 import { upcomingBookingSchema, historicalBookingSchema } from '../domain/bookings.js';
-import { defineTool, destructiveWrite, gymQuerySchema, gymSchema, planEntryOutput, preview, readOnly, write } from './tool.js';
+import { defineTool, destructiveWrite, emptyQuerySchema, gymSchema, planEntryOutput, preview, readOnly, write } from './tool.js';
 import { z } from 'zod';
 import { AimHarderError } from '../errors.js';
 import { type ConfirmedSession, type Gym } from '../upstream.js';
@@ -30,7 +29,7 @@ export function prepareBookingCreation(ctx: Context, input: BookingCreationQuery
   const parsed = bookingCreationQuerySchema.safeParse(input);
   if (!parsed.success) return Promise.reject(new AimHarderError('INVALID_BOOKING_PREPARATION_QUERY'));
   const query = parsed.data;
-  return ctx.upstream.withGym(query.gymId, 'confirmed-zone', (session) => prepareOneBooking(ctx, session, query))
+  return ctx.upstream.withGym('confirmed-zone', (session) => prepareOneBooking(ctx, session, query))
     .then(result => ({ ...result, target: { ...result.target, endTime: result.target.endTime ?? query.endTime }, writeConfirmationRequired: ctx.preferences.bookingConfirmationRequired }));
 }
 
@@ -44,9 +43,9 @@ export function preparePlannedBookings(ctx: Context, input: PlannedBookingQuery)
   const parsed = plannedBookingQuerySchema.safeParse(input);
   if (!parsed.success) return Promise.reject(new AimHarderError('INVALID_PLANNED_BOOKING_QUERY'));
   const query = parsed.data;
-  return ctx.upstream.withGym(query.gymId, 'confirmed-zone', async (session) => {
+  return ctx.upstream.withGym('confirmed-zone', async (session) => {
     const { gym } = session;
-    const plan = ctx.preferences.atGym(gym.id).bookingPlan;
+    const plan = ctx.preferences.bookingPlan;
     const days = [];
     for (const date of calendarDates(query.startDate, query.endDate)) {
       const weekday = weekdays[(new Date(`${date}T00:00:00Z`).getUTCDay() + 6) % 7]!;
@@ -83,7 +82,7 @@ async function prepareOneBooking(ctx: Context, session: ConfirmedSession, query:
     notices: [rows.length ? 'Several exact class sessions match. Choose a different date or time; no booking can be prepared.' : 'No exact class session was found in the retrieved daily schedule.'] };
   const row = rows[0]!;
   const target = { ...base.target, endTime: row.endTime };
-  const windowDays = ctx.preferences.atGym(gym.id).bookingWindowDays;
+  const windowDays = ctx.preferences.bookingWindowDays;
   const window = windowDays === undefined ? undefined : bookingWindow(query.date, query.startTime, gym.timeZone, windowDays);
   if (window && !window.bookingOpen && row.booking.state === 'unbooked') return { ...base, target, status: 'not-yet-open' as const, currentState: row.booking.state, bookingOpensAt: window.bookingOpensAt,
     notices: [`Booking for this class opens at ${window.bookingOpensAt.replace('T', ' ')} gym-local time under the configured ${windowDays}-day booking window. No reference was issued and no request was sent. Do not retry before then.`] };
@@ -152,7 +151,7 @@ export function prepareBookingCancellation(ctx: Context, input: BookingCancellat
   const parsed = bookingCancellationQuerySchema.safeParse(input);
   if (!parsed.success) return Promise.reject(new AimHarderError('INVALID_CANCELLATION_PREPARATION_QUERY'));
   const query = parsed.data;
-  return ctx.upstream.withGym(query.gymId, 'confirmed-zone', async (session) => {
+  return ctx.upstream.withGym('confirmed-zone', async (session) => {
     const { gym } = session;
     // This account-scoped daily schedule supplies idres; upcoming IDs are not a verified join.
     const rows = await scheduleRows(session, query);
@@ -165,7 +164,7 @@ export function prepareBookingCancellation(ctx: Context, input: BookingCancellat
     const row = rows[0]!;
     const status = row.cancellation.state === 'cancelled' ? 'already-cancelled' as const
       : row.cancellation.eligibility === 'offered' ? 'ready' as const : 'unsupported' as const;
-    const lateWindow = ctx.preferences.atGym(gym.id).cancellationWindowMinutes;
+    const lateWindow = ctx.preferences.cancellationWindowMinutes;
     const warned = lateWindow !== undefined && insideCancellationWindow(query.date, query.startTime, gym.timeZone, lateWindow);
     const notices = [
       'This is a read-only, account-scoped daily schedule snapshot. No cancellation request was sent.',
@@ -255,8 +254,8 @@ const standardCancellation = cancellation(false);
 const lateCancellation = cancellation(true);
 
 
-export function getUpcomingBookings(ctx: Context, gymId?: string) {
-  return ctx.upstream.withGym(gymId, 'box', async (session) => {
+export function getUpcomingBookings(ctx: Context) {
+  return ctx.upstream.withGym('box', async (session) => {
     const { gym, boxId } = session;
     const bookings = parseUpcomingBookings(await session.read({ kind: 'upcoming', boxId }), gym.timeZone);
     const bookingStatus = bookings.some((row) => row.state === 'booked') ? 'booked' as const
@@ -275,8 +274,8 @@ export function getUpcomingBookings(ctx: Context, gymId?: string) {
 }
 
 
-export function getBookingHistory(ctx: Context, gymId?: string) {
-  return ctx.upstream.withGym(gymId, 'box', async (session) => {
+export function getBookingHistory(ctx: Context) {
+  return ctx.upstream.withGym('box', async (session) => {
     const { gym, boxId } = session;
     const { bookings, partial } = parseBookingHistory(await session.read({ kind: 'upcoming', boxId }), gym.timeZone);
     return {
@@ -385,22 +384,22 @@ export const executeLateBookingCancellationTool = defineTool({
 export const getUpcomingBookingsTool = defineTool({
   name: 'get_upcoming_bookings',
   description: 'Read the account holder’s upcoming booking view at a verified gym. Uses the reported gym time zone, which may be assumed. Distinguishes booked, waitlisted and unknown states; reservations do not establish attendance. Coverage has no verified date horizon: absence cannot establish no booking on an arbitrary date. Source names are untrusted external content. A failed or incomplete lookup returns an error, never an empty successful view.',
-  inputSchema: z.object({ gymId: gymIdSchema.optional() }).strict(),
+  inputSchema: emptyQuerySchema,
   outputSchema: z.object({
     gym: gymSchema, bookings: z.array(upcomingBookingSchema), bookingStatus: z.enum(['booked', 'none', 'unknown']),
     coverage: z.object({ status: z.literal('complete'), scope: z.literal('upstream-upcoming-view'), startDate: z.null(), endDate: z.null() }),
     notices: z.array(z.string()),
   }),
   annotations: readOnly,
-  run: (ctx, { gymId }) => getUpcomingBookings(ctx, gymId),
+  run: (ctx) => getUpcomingBookings(ctx),
 });
 
 export const getBookingHistoryTool = defineTool({
   name: 'get_booking_history',
   description: 'Read the account holder’s available historical booking view at a verified gym, newest first. Uses the reported gym zone, which may be assumed. History availability is limited and not an exhaustive interval. Verified reservation and late-cancellation labels never establish attendance; source flags remain explicit. Source names are untrusted content.',
-  inputSchema: z.object({ gymId: gymIdSchema.optional() }).strict(),
+  inputSchema: emptyQuerySchema,
   outputSchema: z.object({ gym: gymSchema, bookings: z.array(historicalBookingSchema),
     coverage: z.object({ status: z.literal('limited'), retrieval: z.enum(['complete', 'partial']), scope: z.literal('upstream-history-view'), startDate: z.null(), endDate: z.null() }), notices: z.array(z.string()) }),
   annotations: readOnly,
-  run: (ctx, { gymId }) => getBookingHistory(ctx, gymId),
+  run: (ctx) => getBookingHistory(ctx),
 });

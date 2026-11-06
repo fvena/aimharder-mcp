@@ -108,7 +108,7 @@ You'll need it in step 7. You won't type it to connect Claude or ChatGPT: there 
 
 Your gym ID is the first part of your gym's AimHarder web address. For example, if your gym's page is `https://undergroundrv.aimharder.es`, the ID is `undergroundrv`.
 
-If you don't know it, you can ask Claude later: "What are my AimHarder gym IDs?" Leave the gym settings out for now and add them afterwards (see [Change a setting](#change-a-setting)).
+You only need it if your AimHarder account belongs to several gyms. If you don't know it, leave the gym settings out for now: the settings page (step 13) lets you choose your gym from a list.
 
 ## Step 7. Write your settings file
 
@@ -121,7 +121,7 @@ AIMHARDER_USERNAME=you@example.com
 AIMHARDER_PASSWORD=your-aimharder-password
 MCP_PUBLIC_URL=https://ana-aimharder.fly.dev
 MCP_OWNER_SECRET=the-secret-from-step-5
-AIMHARDER_GYM_TIME_ZONES={"undergroundrv":"Europe/Madrid"}
+AIMHARDER_TIME_ZONE=Europe/Madrid
 ```
 
 Rules that avoid most errors:
@@ -129,19 +129,19 @@ Rules that avoid most errors:
 - **One setting per line.** Never split a value across several lines.
 - **No quotes** around values, and no spaces around `=`.
 - `MCP_PUBLIC_URL` is your address from step 4, starting with `https://`, **without** `/mcp` or a `/` at the end.
-- In the lines with `{ }`, keep the double quotes `"` exactly as in the examples.
+- In a line with `[ ]` or `{ }`, keep the double quotes `"` exactly as in the examples.
 
 ### Optional settings
 
-Add any of these lines if you want them. Replace `undergroundrv` with your gym ID.
+Add any of these lines if you want them.
 
 | Line to add | What it does |
 | --- | --- |
-| `AIMHARDER_DEFAULT_GYM=undergroundrv` | Needed only if your account belongs to several gyms. |
-| `AIMHARDER_BOOKING_WINDOW_DAYS={"undergroundrv":7}` | Your gym opens bookings 7 days ahead. The assistant then won't try to book too early. |
-| `AIMHARDER_CANCELLATION_WINDOW_MINUTES={"undergroundrv":90}` | Cancelling less than 90 minutes before a class may cost a credit. The assistant warns you. |
-| `AIMHARDER_WORKOUT_CLASS={"undergroundrv":"CROSS"}` | The class whose workout you mean when you ask "what's today's workout?". Use the exact name shown in AimHarder. |
-| `AIMHARDER_REQUIRE_BOOKING_CONFIRMATION=false` | Book without a confirmation step when you name an exact class. Cancelling and saving results always ask. The default, `true`, always asks. |
+| `AIMHARDER_GYM=undergroundrv` | Needed only if your account belongs to several gyms: the gym you use, by its ID (step 6). You can also choose it on the settings page. |
+| `AIMHARDER_BOOKING_WINDOW_DAYS=7` | Your gym opens bookings 7 days ahead. The assistant then won't try to book too early. |
+| `AIMHARDER_CANCELLATION_WINDOW_MINUTES=90` | Cancelling less than 90 minutes before a class may cost a credit. The assistant warns you. |
+| `AIMHARDER_WORKOUT_CLASS=CROSS` | The class whose workout you mean when you ask "what's today's workout?". Use the exact name shown in AimHarder. |
+| `AIMHARDER_REQUIRE_BOOKING_CONFIRMATION=false` | Book without a confirmation step when you name an exact class. Cancelling and saving results always ask. The default, `true`, always asks. Choosing another gym on the settings page sets it back to `true`. |
 
 [Configuration](configuration.md) explains every setting in detail.
 
@@ -245,14 +245,15 @@ The first message after a long pause can take a few seconds while your server wa
 
 Open `https://ana-aimharder.fly.dev/settings` and sign in with your AimHarder account. There you can change, without commands:
 
+- your **gym**, if your AimHarder account belongs to several: the assistant uses only the one you choose. Changing it later clears your other settings, since they belong to the previous gym,
+- your gym's **time zone** and its booking and cancellation windows. Until you save it, the time zone shows `Europe/Madrid (sin confirmar)`: pick yours if it's another one and save once to confirm it, since bookings need it,
 - your **weekly booking plan**: pick a day and one of that day's classes, then **Añadir al plan**. You can add several classes on the same day and remove any of them,
 - the class whose workout you mean by "today's workout",
 - whether "who's in this class?" shows everyone or only your friends,
-- your **friends**: choose **Añadir amigos desde una clase**, pick a class you share with them and tick them. You can then change their name to the one you use, for example a nickname.
+- your **friends**: choose **Añadir amigos desde una clase**, pick a class you share with them and tick them. You can then change their name to the one you use, for example a nickname,
+- your **calendar**: under **Calendario**, click **Crear el enlace** and copy the private link into your calendar app as a subscribed calendar ("from URL"). Your upcoming bookings appear there and cancelled ones disappear. The link is shown once; if you lose it, create a new one and the old one stops working, so change it in your calendar app too.
 
 The weekly plan, the workout class and the participant filter can also go in your settings file, but the settings page is simpler; see [configuration](configuration.md).
-
-If your AimHarder account still belongs to a gym you no longer go to, open **Administrar → Gimnasios** and untick it.
 
 To let a friend use your server with their own AimHarder account:
 
@@ -260,7 +261,7 @@ To let a friend use your server with their own AimHarder account:
 2. Send them the link, for example by WhatsApp. It works once and expires after 7 days.
 3. They open it, sign in with their AimHarder account, and get a page with the steps to add the connector to their Claude or ChatGPT. They use the same address, `https://ana-aimharder.fly.dev/mcp`.
 
-Each person only sees and changes their own bookings and settings. Under **Personas con acceso** you can remove someone at any time: their assistants stop working and their password and settings are deleted.
+Each person only sees and changes their own bookings and settings, and chooses their own gym on their settings page. Under **Personas con acceso** you can remove someone at any time: their assistants stop working and their password and settings are deleted.
 
 Your friends' AimHarder passwords are stored encrypted on your server, because it needs them to ask AimHarder on their behalf. Invite only people you trust and who trust you.
 
@@ -270,18 +271,18 @@ Your friends' AimHarder passwords are stored encrypted on your server, because i
 
 ### Change a setting
 
-Your booking plan, workout class, participant filter, friends and your gym's rules can be changed on the settings page (step 13). For everything else, use `fly secrets set` with the name and the new value. Your server restarts by itself.
+Your gym and its rules, booking plan, workout class, participant filter and friends can be changed on the settings page (step 13). For everything else, use `fly secrets set` with the name and the new value. Your server restarts by itself.
 
-**macOS or Linux** (single quotes around values with `{ }`):
+**macOS or Linux** (single quotes around values with `[ ]`, `{ }` or spaces):
 
 ```sh
-fly secrets set -a ana-aimharder AIMHARDER_WORKOUT_CLASS='{"undergroundrv":"CROSS"}'
+fly secrets set -a ana-aimharder AIMHARDER_WORKOUT_CLASS='CROSS'
 ```
 
 **Windows (PowerShell)**: put the whole setting in single quotes:
 
 ```powershell
-fly secrets set -a ana-aimharder 'AIMHARDER_WORKOUT_CLASS={"undergroundrv":"CROSS"}'
+fly secrets set -a ana-aimharder 'AIMHARDER_WORKOUT_CLASS=CROSS'
 ```
 
 You can also edit `aimharder.env` and repeat [step 8](#step-8-send-your-settings-to-fly).
@@ -331,8 +332,9 @@ Messages starting with `INVALID_…` mean a setting is wrong. The message says w
 | What you see | What to do |
 | --- | --- |
 | `INVALID_HTTP_CONFIGURATION` | Check `MCP_PUBLIC_URL` (starts with `https://`, no `/mcp`, no `/` at the end) and that `MCP_OWNER_SECRET` has at least 16 characters. |
-| `INVALID_CONFIGURATION` | `AIMHARDER_USERNAME` or `AIMHARDER_PASSWORD` is missing or empty, or a simple setting such as `AIMHARDER_DEFAULT_GYM` or `AIMHARDER_REQUIRE_BOOKING_CONFIRMATION` has a value it doesn't accept. |
-| `INVALID_TIME_ZONE_CONFIGURATION`, `INVALID_BOOKING_PLAN_CONFIGURATION` or another `INVALID_…` | That setting has a typo. Check it's on one line, has no quotes around the value, keeps the `"` inside `{ }`, and uses two-digit hours (`09:30`). |
+| `INVALID_CONFIGURATION` | `AIMHARDER_USERNAME` or `AIMHARDER_PASSWORD` is missing or empty, or a simple setting such as `AIMHARDER_GYM` or `AIMHARDER_REQUIRE_BOOKING_CONFIRMATION` has a value it doesn't accept. |
+| `LEGACY_CONFIGURATION` | A setting still uses the old per-gym form, such as `AIMHARDER_DEFAULT_GYM` or `{"undergroundrv":7}`. Rename or simplify it as the message says (step 7 shows the current forms). |
+| `INVALID_TIME_ZONE_CONFIGURATION`, `INVALID_BOOKING_PLAN_CONFIGURATION` or another `INVALID_…` | That setting has a typo. Check it's on one line, has no quotes around the value, keeps the `"` inside `[ ]` or `{ }`, and uses two-digit hours (`09:30`). |
 | `/healthz` doesn't load | Wait a minute and retry. If it still fails, read `fly logs`. |
 | `fly deploy` fails while "Building image" | Fly's build service had a problem. Retry later. If you have [Docker Desktop](https://www.docker.com/products/docker-desktop/) running, `fly deploy -a ana-aimharder --local-only` builds on your computer instead. |
 | `Error: … missing an app name` | Add `-a ana-aimharder` to the command, or run it inside the project folder. |
@@ -343,7 +345,8 @@ Messages starting with `INVALID_…` mean a setting is wrong. The message says w
 | ChatGPT rejects the plugin settings | Check that **Server URL** uses your own HTTPS address ending in `/mcp` and authentication is **OAuth** with dynamic registration. The server already accepts ChatGPT’s callback URLs. |
 | `AUTHENTICATION_FAILED` when you ask something | AimHarder rejected the email or password. Fix them with `fly secrets set`. |
 | A friend gets `AUTHENTICATION_FAILED` after changing their AimHarder password | They sign in once at `https://ana-aimharder.fly.dev/settings` with the new password; the server updates it. |
-| Booking says a time zone is required | Add `AIMHARDER_GYM_TIME_ZONES` (step 7). |
+| Booking says a time zone is required | Save your gym's time zone on the settings page, or add `AIMHARDER_TIME_ZONE` (step 7). |
+| The assistant says to choose a gym (`GYM_REQUIRED`) | Your AimHarder account belongs to several gyms. Choose yours on the settings page (step 13). |
 
 ## Security in short
 

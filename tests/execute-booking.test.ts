@@ -47,7 +47,7 @@ afterAll(() => upstream.close());
 
 async function connect(requireConfirmation = true) {
   const server = createServer({ AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic',
-    AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid"}', AIMHARDER_REQUIRE_BOOKING_CONFIRMATION: String(requireConfirmation) });
+    AIMHARDER_TIME_ZONE: 'Europe/Madrid', AIMHARDER_REQUIRE_BOOKING_CONFIRMATION: String(requireConfirmation) });
   const client = new Client({ name: 'booking-execution-test', version: '1.0.0' });
   const [a, b] = InMemoryTransport.createLinkedPair();
   connections.push({ client, server });

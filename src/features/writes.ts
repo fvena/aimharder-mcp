@@ -29,7 +29,7 @@ export interface Reference { actionReference: string; expiresAt: string }
 /** Issue a new reference from inside a reconciliation, such as a late cancellation after a credit-loss warning. */
 export type Issue = <Q>(action: WriteAction<Q, unknown>, plan: Q) => Reference;
 
-export interface ExecutionInput { gymId?: string | undefined; actionReference: string; confirmed?: true | undefined; confirmedCreditLoss?: true | undefined }
+export interface ExecutionInput { actionReference: string; confirmed?: true | undefined; confirmedCreditLoss?: true | undefined }
 
 /** One kind of write: how its execution input is read and confirmed, and what it reads and sends. */
 export interface WriteAction<P, R> {
@@ -73,8 +73,8 @@ export class WriteActions {
     if (action.confirmation.required(this.preferences) && parsed.data[action.confirmation.marker] !== true) {
       return Promise.reject(new AimHarderError('WRITE_CONFIRMATION_REQUIRED'));
     }
-    const { gymId, actionReference } = parsed.data;
-    return this.upstream.withGym(gymId, 'box', async (session) => {
+    const { actionReference } = parsed.data;
+    return this.upstream.withGym('box', async (session) => {
       const entry = this.#take(actionReference, action.kind, session.accountId, session.gym.id);
       if (!entry) throw new AimHarderError(action.invalidReference);
       const prepared = entry.prepared as Prepared<P>;

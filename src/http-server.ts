@@ -8,6 +8,7 @@ import { mcpAuthRouter, getOAuthProtectedResourceMetadataUrl } from '@modelconte
 import { requireBearerAuth } from '@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js';
 import { Accounts, ownerSub } from './accounts.js';
 import { readConfiguration, readHttpConfiguration } from './config.js';
+import { CalendarFeeds, calendarCacheSeconds, matchesTag } from './features/calendar.js';
 import { AccountsOAuthProvider, sendApprovalPage } from './oauth.js';
 import { createServerForContext } from './server.js';
 import { Store } from './store.js';
@@ -68,6 +69,27 @@ export function createHttpApp(environment: Record<string, string | undefined>) {
     } catch {
       if (!res.headersSent) res.status(500).json({ jsonrpc: '2.0', error: { code: -32603, message: 'Internal error' }, id: null });
     }
+  });
+  // The calendar feed: a secret link per account instead of OAuth, which calendar apps cannot do. The link is the only
+  // credential, so it never goes into logs or errors. Each account's feed is read from AimHarder at most every few
+  // minutes; a failed read is an error (calendar apps then keep what they had), never an empty calendar.
+  const feedLimit = rateLimit({
+    windowMs: 15 * 60 * 1000, limit: 60, standardHeaders: true, legacyHeaders: false,
+    handler: (_req, res) => { res.status(429).set('Retry-After', '900').type('text/plain; charset=utf-8').send('Too many requests.'); },
+  });
+  const feeds = new CalendarFeeds();
+  app.get('/calendar/:file', feedLimit, async (req, res) => {
+    const file = String(req.params.file);
+    const sub = file.endsWith('.ics') ? accounts.calendarFeedAccount(file.slice(0, -'.ics'.length)) : undefined;
+    const ctx = sub === undefined ? undefined : accounts.context(sub);
+    res.set('Cache-Control', 'private, no-store').set('X-Robots-Tag', 'noindex').set('Referrer-Policy', 'no-referrer');
+    if (sub === undefined || !ctx) { res.status(404).type('text/plain; charset=utf-8').send('Not found.'); return; }
+    let feed;
+    try { feed = await feeds.read(sub, ctx); }
+    catch { res.status(503).set('Retry-After', String(calendarCacheSeconds)).type('text/plain; charset=utf-8').send('AimHarder could not be read. Try again later.'); return; }
+    res.set('Cache-Control', `private, max-age=${calendarCacheSeconds}`).set('ETag', feed.etag);
+    if (matchesTag(req.get('if-none-match'), feed.etag)) { res.status(304).end(); return; }
+    res.type('text/calendar; charset=utf-8').send(feed.body);
   });
   app.use(webRouter(config, accounts, provider, signInLimit));
   return { app, config, close: () => store.close() };

@@ -19,10 +19,9 @@ It is an independent project, neither affiliated with nor endorsed by AimHarder.
    ```dotenv
    AIMHARDER_USERNAME=you@example.com
    AIMHARDER_PASSWORD=your-password
-   AIMHARDER_DEFAULT_GYM=your-gym-id
-   AIMHARDER_GYM_TIME_ZONES={"your-gym-id":"Europe/Madrid"}
-   AIMHARDER_BOOKING_WINDOW_DAYS={"your-gym-id":7}
-   AIMHARDER_WORKOUT_CLASS={"your-gym-id":"CROSS"}
+   AIMHARDER_TIME_ZONE=Europe/Madrid
+   AIMHARDER_BOOKING_WINDOW_DAYS=7
+   AIMHARDER_WORKOUT_CLASS=CROSS
    ```
 
 4. Add the server to your MCP client as a stdio command, for example in Claude Desktop:
@@ -38,13 +37,13 @@ It is an independent project, neither affiliated with nor endorsed by AimHarder.
    }
    ```
 
-The first tool call signs in. Use `get_account_context` to see your gym IDs and time zones. See [configuration](docs/configuration.md) for details.
+The first tool call signs in. Use `get_account_context` to see your gym and its time zone. An account with several gyms also sets `AIMHARDER_GYM`. See [configuration](docs/configuration.md) for details.
 
 ## Use it from Claude or ChatGPT on the web and mobile
 
 **New to this?** Follow the [step-by-step setup guide](docs/setup-guide.md): no programming knowledge needed.
 
-Deploy your own instance (the [Dockerfile](Dockerfile) works on Fly.io and similar platforms with a persistent volume, or on your computer behind a tunnel) with `MCP_TRANSPORT=http`, `MCP_PUBLIC_URL` and an `MCP_OWNER_SECRET`. Then add `https://<your-host>/mcp` as a [custom connector in Claude](docs/setup-guide.md#step-10-connect-claude) or a [personal plugin in ChatGPT](docs/setup-guide.md#step-11-connect-chatgpt-optional), and approve it by signing in with your AimHarder account. Invite friends from the server's `/admin` page: each joins with their own AimHarder account, and everyone edits their weekly plan, workout class and friends at `/settings`. See [remote use](docs/remote.md).
+Deploy your own instance (the [Dockerfile](Dockerfile) works on Fly.io and similar platforms with a persistent volume, or on your computer behind a tunnel) with `MCP_TRANSPORT=http`, `MCP_PUBLIC_URL` and an `MCP_OWNER_SECRET`. Then add `https://<your-host>/mcp` as a [custom connector in Claude](docs/setup-guide.md#step-10-connect-claude) or a [personal plugin in ChatGPT](docs/setup-guide.md#step-11-connect-chatgpt-optional), and approve it by signing in with your AimHarder account. Invite friends from the server's `/admin` page: each joins with their own AimHarder account, and everyone edits their weekly plan, workout class and friends at `/settings`, where they can also create a private calendar link to subscribe to their upcoming bookings. See [remote use](docs/remote.md).
 
 ## Tools
 

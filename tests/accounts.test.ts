@@ -90,11 +90,11 @@ function freePort() {
   });
 }
 
-async function start() {
-  const { app, config, close } = createHttpApp({
+async function start(extra: Record<string, string> = {}) {
+  const { app, config, close } = createHttpApp({ ...extra,
     AIMHARDER_USERNAME: people.owner.username, AIMHARDER_PASSWORD: people.owner.password,
-    AIMHARDER_BOOKING_PLAN: '{"sample-gym":[{"day":"mon","className":"CROSS","startTime":"07:00"}]}',
-    AIMHARDER_WORKOUT_CLASS: '{"sample-gym":"CROSS"}',
+    AIMHARDER_BOOKING_PLAN: '[{"day":"mon","className":"CROSS","startTime":"07:00"}]',
+    AIMHARDER_WORKOUT_CLASS: 'CROSS',
     MCP_PUBLIC_URL: base, MCP_OWNER_SECRET: ownerSecret, PORT: String(port), MCP_DATA_DIR: dataDir,
   });
   const server = await new Promise<HttpServer>((resolve) => { const s = app.listen(config.port, '127.0.0.1', () => resolve(s)); });
@@ -234,22 +234,24 @@ test('each account edits its own plan, preferences and friends, and the connecto
   const page = await (await get('/settings', cookie)).text();
   expect(page).toContain('Plan semanal');
   expect(page).toContain('<option value="tue|07:00|CROSS">07:00 · CROSS</option>');
-  expect(page).toContain('<option value="CROSS" selected>CROSS</option>');
-  expect(page).not.toContain('Gimnasio por defecto');
+  // Members start from their own settings only: the environment configures the owner's account.
+  expect(page).toContain('<option value="" selected>Ninguna</option>');
+  expect(page).toContain('Europe/Madrid (sin confirmar)');
+  expect(page).not.toContain('Cambiar de gimnasio');
   expect(page).toContain('<script src="/assets/app.js" defer></script>');
   expect((await get('/assets/app.js')).headers.get('content-type')).toContain('text/javascript');
 
   const outcome = (section: string, message: string, field?: string) => `/settings?message=${message}&section=${section}${field ? `&field=${field}` : ''}#${field ?? section}`;
   for (const slot of ['tue|07:00|CROSS', 'mon|07:00|CROSS', 'tue|07:00|CROSS']) {
-    expect((await post('/settings/plan/add', { gym: 'sample-gym', day: 'mon', slot }, cookie)).headers.get('location')).toBe(outcome('plan', 'plan-added'));
+    expect((await post('/settings/plan/add', { day: 'mon', slot }, cookie)).headers.get('location')).toBe(outcome('plan', 'plan-added'));
   }
-  expect((await post('/settings/plan/add', { gym: 'sample-gym', day: 'mon', slot: 'someday|07:00|CROSS' }, cookie)).headers.get('location')).toBe(outcome('plan', 'plan-slot'));
-  expect((await post('/settings/plan/add', { gym: 'sample-gym', day: 'mon', slot: '' }, cookie)).headers.get('location')).toBe(outcome('plan', 'plan-slot'));
-  expect((await post('/settings/plan/remove', { gym: 'sample-gym', day: 'mon', startTime: '07:00', className: 'CROSS' }, cookie)).headers.get('location')).toBe(outcome('plan', 'plan-removed'));
-  expect((await post('/settings/preferences', { 'workout:sample-gym': 'CROSS', participantsFilter: 'friends' }, cookie)).headers.get('location')).toBe(outcome('preferencias', 'saved'));
+  expect((await post('/settings/plan/add', { day: 'mon', slot: 'someday|07:00|CROSS' }, cookie)).headers.get('location')).toBe(outcome('plan', 'plan-slot'));
+  expect((await post('/settings/plan/add', { day: 'mon', slot: '' }, cookie)).headers.get('location')).toBe(outcome('plan', 'plan-slot'));
+  expect((await post('/settings/plan/remove', { day: 'mon', startTime: '07:00', className: 'CROSS' }, cookie)).headers.get('location')).toBe(outcome('plan', 'plan-removed'));
+  expect((await post('/settings/preferences', { workout: 'CROSS', participantsFilter: 'friends' }, cookie)).headers.get('location')).toBe(outcome('preferencias', 'saved'));
   expect((await post('/settings/preferences', { participantsFilter: 'following' }, cookie)).headers.get('location')).toBe(outcome('preferencias', 'invalid'));
 
-  const found = await (await get('/settings/friends/find?gym=sample-gym&date=2026-11-05&class=CROSS&time=07:00', cookie)).text();
+  const found = await (await get('/settings/friends/find?date=2026-11-05&class=CROSS&time=07:00', cookie)).text();
   expect(found).toContain('Private Partner');
   expect(found).toContain('src="https://images.example.invalid/88-new.jpg"');
   expect(found).not.toContain('Friend Fixture');
@@ -258,7 +260,7 @@ test('each account edits its own plan, preferences and friends, and the connecto
   expect((await post('/settings/friends/rename', { 'name:88': '' }, cookie)).headers.get('location')).toBe(outcome('amigos', 'friend'));
   expect((await post('/settings/friends/add', { friend: '89', 'name:89': 'Someone', 'photo:89': 'http://images.example.invalid/89.jpg' }, cookie)).headers.get('location')).toBe(outcome('amigos', 'friend'));
   // Seeing a friend again in a class refreshes their picture.
-  await get('/settings/friends/find?gym=sample-gym&date=2026-11-05&class=CROSS&time=07:00', cookie);
+  await get('/settings/friends/find?date=2026-11-05&class=CROSS&time=07:00', cookie);
   const settings = await (await get('/settings', cookie)).text();
   expect(settings).toContain('value="Pepe"');
   expect(settings).toContain('src="https://images.example.invalid/88-new.jpg"');
@@ -273,28 +275,79 @@ test('each account edits its own plan, preferences and friends, and the connecto
   expect((await accountContext(owner.accessToken!)).structuredContent).toMatchObject({ defaults: { friends: 0, bookingPlan: [{ day: 'mon', className: 'CROSS' }] } });
 });
 
-test('the owner chooses the gyms the server uses, for every account', async () => {
+test('an account with several gyms chooses one, and choosing another clears its other settings', async () => {
   ownerRoles = [sampleGym, oldGym];
   const owner = await signIn(people.owner);
-  const admin = await (await get('/admin', owner)).text();
-  expect(admin).toContain('Gimnasio antiguo');
-  expect((await connect(people.owner)).status).toBe(302);
-  expect((await post('/admin/gyms', {}, owner)).headers.get('location')).toBe('/admin?message=gyms&section=gimnasios#gimnasios');
-  expect((await post('/admin/gyms', { gym: 'sample-gym' }, owner)).headers.get('location')).toBe('/admin?message=saved&section=gimnasios#gimnasios');
-
   const connection = await connect(people.owner);
-  const result = await accountContext(connection.accessToken!);
-  expect(result.isError).not.toBe(true);
-  expect(result.structuredContent).toMatchObject({ gyms: [{ id: 'sample-gym' }], selectedGym: { id: 'sample-gym' } });
-  expect(await (await get('/settings', owner)).text()).not.toContain('Gimnasio antiguo');
-  expect(await (await get('/admin', owner)).text()).toContain('Gimnasio antiguo');
+  expect(connection.status).toBe(302);
+  expect(JSON.stringify(await accountContext(connection.accessToken!))).toContain('GYM_REQUIRED');
+  const choosing = await (await get('/settings', owner)).text();
+  expect(choosing).toContain('<option value="" selected disabled>Elige tu gimnasio</option>');
+  expect(choosing).toContain('Gimnasio antiguo');
+  expect(choosing).not.toContain('Plan semanal');
+  expect((await get('/settings/friends/find', owner)).headers.get('location')).toBe('/settings#gimnasio');
 
-  // Someone whose only gym is not used cannot join, and the invitation stays unused.
-  const path = await invite();
-  const refused = await post(path, { username: people.formerMember.username, password: people.formerMember.password });
-  expect(refused.status).toBe(403);
-  expect(await refused.text()).toContain('no es de ninguno de los gimnasios');
-  expect((await get(path)).status).toBe(200);
+  const outcome = (message: string) => `/settings?message=${message}&section=gimnasio#gimnasio`;
+  expect((await post('/settings/gym', { gym: 'foreign-gym' }, owner)).headers.get('location')).toBe(outcome('gym'));
+  expect((await post('/settings/gym', { gym: 'sample-gym' }, owner)).headers.get('location')).toBe(outcome('gym-chosen'));
+  // The first choice clears what the environment sets too: it was set for no gym in particular.
+  expect((await accountContext(connection.accessToken!)).structuredContent).toMatchObject({ gym: { id: 'sample-gym' }, defaults: { bookingPlan: [], workoutClass: null } });
+  await post('/settings/rules', { tz: 'Atlantic/Canary', book: '', cancel: '' }, owner);
+  await post('/settings/plan/add', { slot: 'tue|07:00|CROSS' }, owner);
+  await post('/settings/preferences', { workout: 'CROSS', participantsFilter: 'friends' }, owner);
+  await post('/settings/friends/add', { friend: '88', 'name:88': 'Private Partner' }, owner);
+  expect((await post('/settings/gym', { gym: 'sample-gym' }, owner)).headers.get('location')).toBe(outcome('gym-chosen'));
+  expect((await accountContext(connection.accessToken!)).structuredContent).toMatchObject({ gym: { id: 'sample-gym', timeZone: 'Atlantic/Canary' }, defaults: { workoutClass: 'CROSS', friends: 1 } });
+
+  expect((await post('/settings/gym', { gym: 'old-gym' }, owner)).headers.get('location')).toBe(outcome('gym-chosen'));
+  const after = (await accountContext(connection.accessToken!)).structuredContent;
+  expect(after).toMatchObject({ gym: { id: 'old-gym', timeZoneStatus: 'assumed' }, defaults: { bookingPlan: [], workoutClass: null, participantsFilter: 'all', friends: 0 } });
+  expect(await (await get('/settings', owner)).text()).toContain('Cambiar de gimnasio');
+
+  // A chosen gym that is no longer the account's asks for another.
+  ownerRoles = [sampleGym];
+  expect(JSON.stringify(await accountContext(connection.accessToken!))).toContain('GYM_NOT_ACCESSIBLE');
+  expect(await (await get('/settings', owner)).text()).toContain('Tu gimnasio ya no está disponible: elige otro.');
+
+  // Administration no longer manages gyms.
+  expect(await (await get('/admin', owner)).text()).not.toContain('Gimnasios');
+  expect((await post('/admin/gyms', { gym: 'sample-gym' }, owner)).status).toBe(404);
+});
+
+test('choosing another gym also sets booking confirmation back to its default', async () => {
+  ownerRoles = [sampleGym, oldGym];
+  await stopAll();
+  await start({ AIMHARDER_GYM: 'sample-gym', AIMHARDER_REQUIRE_BOOKING_CONFIRMATION: 'false' });
+  const owner = await signIn(people.owner);
+  const connection = await connect(people.owner);
+  expect((await accountContext(connection.accessToken!)).structuredContent).toMatchObject({ writeConfirmationPolicy: { bookingCreation: false } });
+  await post('/settings/gym', { gym: 'old-gym' }, owner);
+  expect((await accountContext(connection.accessToken!)).structuredContent).toMatchObject({ gym: { id: 'old-gym' }, writeConfirmationPolicy: { bookingCreation: true } });
+});
+
+test('a data file of version 2 keeps what applied at each account\'s gym', async () => {
+  await joinAs(people.friend);
+  await stopAll();
+  const db = new DatabaseSync(join(dataDir, 'aimharder-mcp.sqlite'));
+  db.exec(`INSERT OR REPLACE INTO settings (scope, value, updated_at) VALUES
+    ('gym', '{"gymTimeZones":{"sample-gym":"Atlantic/Canary"},"cancellationWindowMinutes":{"sample-gym":90},"activeGyms":["sample-gym"]}', '2026-01-01'),
+    ('member:77', '{"defaultGym":"sample-gym","workoutClasses":{"sample-gym":"CROSS"},"bookingPlans":{"sample-gym":[{"day":"wed","className":"CROSS","startTime":"07:00"}],"old-gym":[]},"participantsFilter":"friends"}', '2026-01-01');
+    DROP TABLE calendar_feeds; PRAGMA user_version = 2;`);
+  db.close();
+  await start();
+  const friend = await accountContext((await connect(people.friend)).accessToken!);
+  expect(friend.structuredContent).toMatchObject({ gym: { id: 'sample-gym', timeZone: 'Atlantic/Canary', timeZoneStatus: 'user-confirmed' },
+    defaults: { workoutClass: 'CROSS', participantsFilter: 'friends', bookingPlan: [{ day: 'wed', className: 'CROSS', startTime: '07:00' }] } });
+  // The owner had no settings of their own: the gym rules still apply to them.
+  const owner = await accountContext((await connect(people.owner)).accessToken!);
+  expect(owner.structuredContent).toMatchObject({ gym: { timeZone: 'Atlantic/Canary' }, defaults: { bookingPlan: [{ day: 'mon', className: 'CROSS' }] } });
+  await stopAll();
+  const migrated = new DatabaseSync(join(dataDir, 'aimharder-mcp.sqlite'));
+  expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 4 });
+  expect(migrated.prepare("SELECT scope FROM settings WHERE scope = 'gym'").all()).toEqual([]);
+  expect(migrated.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'calendar_feeds'").all()).toHaveLength(1);
+  migrated.close();
+  await start();
 });
 
 test('a data file from the previous version keeps members and drops personal settings in the old format', async () => {
@@ -342,21 +395,29 @@ test('administration is for the owner only, and forms must come from this origin
   const { cookie } = await joinAs(people.friend);
   expect((await get('/admin', cookie)).status).toBe(404);
   expect((await post('/admin/invitations', { label: 'Someone' }, cookie)).status).toBe(404);
-  expect((await post('/settings/plan/add', { gym: 'sample-gym', slot: 'mon|07:00|CROSS' }, cookie, null)).status).toBe(403);
-  expect((await post('/settings/plan/add', { gym: 'sample-gym', slot: 'mon|07:00|CROSS' }, cookie, 'https://attacker.example.invalid')).status).toBe(403);
+  expect((await post('/settings/plan/add', { slot: 'mon|07:00|CROSS' }, cookie, null)).status).toBe(403);
+  expect((await post('/settings/plan/add', { slot: 'mon|07:00|CROSS' }, cookie, 'https://attacker.example.invalid')).status).toBe(403);
   expect((await get('/settings')).headers.get('location')).toBe('/login');
 });
 
-test('the owner sets the gym rules for every account', async () => {
-  const owner = await signIn(people.owner);
-  expect((await post('/admin/gym', { 'tz:sample-gym': 'Europe/Madrid', 'book:sample-gym': '7', 'cancel:sample-gym': '90' }, owner)).headers.get('location')).toBe('/admin?message=saved&section=reglas#reglas');
-  expect((await post('/admin/gym', { 'tz:sample-gym': 'Mars/Olympus' }, owner)).headers.get('location')).toBe('/admin?message=tz&section=reglas&field=tz-sample-gym#tz-sample-gym');
-  expect((await post('/admin/gym', { 'book:sample-gym': '99' }, owner)).headers.get('location')).toBe('/admin?message=book&section=reglas&field=book-sample-gym#book-sample-gym');
-  const invalidRule = await (await get('/admin?message=book&section=reglas&field=book-sample-gym', owner)).text();
-  expect(invalidRule).toContain('aria-invalid="true" aria-describedby="book-sample-gym-error"');
-  await joinAs(people.friend);
+test('each account sets its own gym rules', async () => {
+  const { cookie } = await joinAs(people.friend);
+  const outcome = (message: string, field?: string) => `/settings?message=${message}&section=gimnasio${field ? `&field=${field}` : ''}#${field ?? 'gimnasio'}`;
+  // An unconfirmed zone shows Europe/Madrid, marked as unconfirmed; saving the rules confirms the zone shown.
+  expect(await (await get('/settings', cookie)).text()).toContain('<option value="Europe/Madrid" selected>Europe/Madrid (sin confirmar)</option>');
+  expect((await accountContext((await connect(people.friend)).accessToken!)).structuredContent).toMatchObject({ gym: { timeZoneStatus: 'assumed' } });
+  expect((await post('/settings/rules', { tz: 'Europe/Madrid', book: '7', cancel: '90' }, cookie)).headers.get('location')).toBe(outcome('saved'));
+  expect(await (await get('/settings', cookie)).text()).not.toContain('(sin confirmar)');
+  expect((await post('/settings/rules', { tz: 'Mars/Olympus', book: '', cancel: '' }, cookie)).headers.get('location')).toBe(outcome('tz', 'tz'));
+  expect((await post('/settings/rules', { tz: 'Europe/Madrid', book: '99', cancel: '' }, cookie)).headers.get('location')).toBe(outcome('book', 'book'));
+  expect((await post('/settings/rules', { tz: 'Europe/Madrid', book: '', cancel: '1.5' }, cookie)).headers.get('location')).toBe(outcome('cancel', 'cancel'));
+  const invalidRule = await (await get('/settings?message=book&section=gimnasio&field=book', cookie)).text();
+  expect(invalidRule).toContain('aria-invalid="true" aria-describedby="book-error"');
+  expect(invalidRule).toContain('value="7"');
   const friend = await connect(people.friend);
-  expect((await accountContext(friend.accessToken!)).structuredContent).toMatchObject({ selectedGym: { timeZone: 'Europe/Madrid', timeZoneStatus: 'user-confirmed' } });
+  expect((await accountContext(friend.accessToken!)).structuredContent).toMatchObject({ gym: { timeZone: 'Europe/Madrid', timeZoneStatus: 'user-confirmed' } });
+  const owner = await connect(people.owner);
+  expect((await accountContext(owner.accessToken!)).structuredContent).toMatchObject({ gym: { timeZoneStatus: 'assumed' } });
 });
 
 test('tokens issued before accounts existed keep working as the owner\'s', async () => {
@@ -370,13 +431,13 @@ test('tokens issued before accounts existed keep working as the owner\'s', async
 
 test('the owner edits a plan that starts from the environment, and the environment entries stay in it', async () => {
   const cookie = await signIn(people.owner);
-  expect((await post('/settings/plan/add', { gym: 'sample-gym', day: 'tue', slot: 'tue|07:00|CROSS' }, cookie)).status).toBe(303);
+  expect((await post('/settings/plan/add', { day: 'tue', slot: 'tue|07:00|CROSS' }, cookie)).status).toBe(303);
   const owner = await connect(people.owner);
   const result = await accountContext(owner.accessToken!);
   expect(result.structuredContent).toMatchObject({ defaults: { bookingPlan: [
     { day: 'mon', className: 'CROSS', startTime: '07:00' }, { day: 'tue', className: 'CROSS', startTime: '07:00' },
   ] } });
-  expect((await post('/settings/plan/remove', { gym: 'sample-gym', day: 'mon', startTime: '07:00', className: 'CROSS' }, cookie)).status).toBe(303);
+  expect((await post('/settings/plan/remove', { day: 'mon', startTime: '07:00', className: 'CROSS' }, cookie)).status).toBe(303);
   const after = await accountContext((await connect(people.owner)).accessToken!);
   expect(after.structuredContent).toMatchObject({ defaults: { bookingPlan: [{ day: 'tue', className: 'CROSS', startTime: '07:00' }] } });
 });
@@ -385,7 +446,7 @@ test('the owner can clear a workout class that comes from the environment', asyn
   const cookie = await signIn(people.owner);
   const owner = await connect(people.owner);
   expect((await accountContext(owner.accessToken!)).structuredContent).toMatchObject({ defaults: { workoutClass: 'CROSS' } });
-  expect((await post('/settings/preferences', { 'workout:sample-gym': '' }, cookie)).status).toBe(303);
+  expect((await post('/settings/preferences', { workout: '' }, cookie)).status).toBe(303);
   expect((await accountContext((await connect(people.owner)).accessToken!)).structuredContent).toMatchObject({ defaults: { workoutClass: null } });
   expect(await (await get('/settings', cookie)).text()).toContain('<option value="" selected>Ninguna</option>');
 });

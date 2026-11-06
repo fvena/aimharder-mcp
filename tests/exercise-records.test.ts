@@ -38,7 +38,7 @@ upstream.events.on('request:start', ({ request }) => requests.push({ method: req
 afterEach(async () => { for (const { client, server } of connections.splice(0)) { await client.close(); await server.close(); } upstream.resetHandlers(); });
 afterAll(() => upstream.close());
 async function connect(extra: Record<string, string | undefined> = {}) {
- const server = createServer({ AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic-password', AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid"}', ...extra });
+ const server = createServer({ AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic-password', AIMHARDER_TIME_ZONE: 'Europe/Madrid', ...extra });
  const client = new Client({ name: 'exercise-records-harness', version: '1.0.0' });
  const [a, b] = InMemoryTransport.createLinkedPair();
  connections.push({ client, server }); await server.connect(b); await client.connect(a);

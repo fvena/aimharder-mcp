@@ -48,7 +48,7 @@ afterEach(async () => {
 afterAll(() => upstream.close());
 
 async function range(args: Record<string, unknown>) {
-  const server = createServer({ AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic-password', AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid"}' });
+  const server = createServer({ AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic-password', AIMHARDER_TIME_ZONE: 'Europe/Madrid' });
   const client = new Client({ name: 'range-harness', version: '1.0.0' });
   const [a, b] = InMemoryTransport.createLinkedPair();
   connections.push({ client, server });
@@ -95,14 +95,14 @@ test('rejects reversed or overlong ranges before any upstream request', async ()
 });
 
 async function call(name: string, args: Record<string, unknown>, extra: Record<string, string> = {}) {
-  const server = createServer({ AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic-password', AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid"}', ...extra });
+  const server = createServer({ AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic-password', AIMHARDER_TIME_ZONE: 'Europe/Madrid', ...extra });
   const client = new Client({ name: 'workout-class-harness', version: '1.0.0' });
   const [a, b] = InMemoryTransport.createLinkedPair();
   connections.push({ client, server });
   await server.connect(b); await client.connect(a);
   return client.callTool({ name, arguments: args });
 }
-const configured = { AIMHARDER_WORKOUT_CLASS: '{"sample-gym":"CROSS"}' };
+const configured = { AIMHARDER_WORKOUT_CLASS: 'CROSS' };
 
 test('without className the configured workout class applies, and the day lists every published class', async () => {
   const result = await call('get_published_workouts', { date: '2026-11-05' }, configured);
@@ -134,7 +134,7 @@ test('the range tool uses the configured class too', async () => {
 });
 
 test('rejects an invalid workout class configuration', () => {
-  for (const value of ['"CROSS"', '{"sample-gym":""}', 'not json']) {
+  for (const value of ['', '   ', '{"sample-gym":"CROSS"}', 'x'.repeat(301)]) {
     expect(() => createServer({ AIMHARDER_USERNAME: 'a', AIMHARDER_PASSWORD: 'b', AIMHARDER_WORKOUT_CLASS: value })).toThrow();
   }
 });

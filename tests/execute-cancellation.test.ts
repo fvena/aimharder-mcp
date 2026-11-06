@@ -51,7 +51,7 @@ afterAll(() => upstream.close());
 
 async function connect(gymId = 'sample-gym', requireConfirmation = true, extra: Record<string, string> = {}) {
   const server = createServer({ AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic',
-    AIMHARDER_REQUIRE_BOOKING_CONFIRMATION: String(requireConfirmation), AIMHARDER_GYM_TIME_ZONES: JSON.stringify({ [gymId]: 'Europe/Madrid' }), ...extra });
+    AIMHARDER_REQUIRE_BOOKING_CONFIRMATION: String(requireConfirmation), AIMHARDER_GYM: gymId, AIMHARDER_TIME_ZONE: 'Europe/Madrid', ...extra });
   const client = new Client({ name: 'cancellation-execution-test', version: '1.0.0' });
   const [a, b] = InMemoryTransport.createLinkedPair();
   connections.push({ client, server });
@@ -163,7 +163,7 @@ test('crossing the configured cancellation window after preparation requires a n
   );
   vi.useFakeTimers({ toFake: ['Date'] });
   vi.setSystemTime(new Date('2026-09-26T06:29:00Z'));
-  const client = await connect('sample-gym', true, { AIMHARDER_CANCELLATION_WINDOW_MINUTES: '{"sample-gym":90}' });
+  const client = await connect('sample-gym', true, { AIMHARDER_CANCELLATION_WINDOW_MINUTES: '90' });
   const reference = await prepare(client);
   vi.setSystemTime(new Date('2026-09-26T06:30:00Z'));
   expect((await execute(client, reference)).structuredContent).toMatchObject({ status: 'stale', observedState: 'booked' });

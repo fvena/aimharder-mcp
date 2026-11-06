@@ -40,7 +40,7 @@ afterAll(() => upstream.close());
 
 async function connect(extra: Record<string, string | undefined> = {}) {
   const server = createServer({ AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic-password',
-    AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid"}', ...extra });
+    AIMHARDER_TIME_ZONE: 'Europe/Madrid', ...extra });
   const client = new Client({ name: 'booking-preparation-test', version: '1.0.0' });
   const [a, b] = InMemoryTransport.createLinkedPair();
   connections.push({ client, server });
@@ -113,7 +113,7 @@ test('prepares a class when the optional source hidden flag is absent', async ()
 });
 
 test('an assumed zone and an inaccessible gym block preparation', async () => {
-  expect((await prepare(await connect({ AIMHARDER_GYM_TIME_ZONES: undefined }))).isError).toBe(true);
+  expect((await prepare(await connect({ AIMHARDER_TIME_ZONE: undefined }))).isError).toBe(true);
   expect(requests.some(({ pathname }) => pathname === '/aplic/apiExternal/bookings')).toBe(false);
   expect((await prepare(await connect(), { gymId: 'other-gym' })).isError).toBe(true);
   expect(requests.some(({ pathname }) => pathname === '/aplic/apiExternal/bookings')).toBe(false);
@@ -157,7 +157,7 @@ test('booking window opens the configured days before the class at the same gym-
 
 test('returns not-yet-open without a reference or write when the configured window is closed', async () => {
   const date = madridDate(10);
-  const client = await connect({ AIMHARDER_BOOKING_WINDOW_DAYS: '{"sample-gym":7}' });
+  const client = await connect({ AIMHARDER_BOOKING_WINDOW_DAYS: '7' });
   const result = await prepare(client, { date });
   expect(result.isError).not.toBe(true);
   expect(result.structuredContent).toMatchObject({ status: 'not-yet-open', bookingOpensAt: `${madridDate(3)}T10:00`, currentState: 'unbooked' });
@@ -166,14 +166,15 @@ test('returns not-yet-open without a reference or write when the configured wind
 });
 
 test('prepares normally inside the configured window and without a configured window', async () => {
-  const inside = await prepare(await connect({ AIMHARDER_BOOKING_WINDOW_DAYS: '{"sample-gym":7}' }), { date: madridDate(3) });
+  const inside = await prepare(await connect({ AIMHARDER_BOOKING_WINDOW_DAYS: '7' }), { date: madridDate(3) });
   expect(inside.structuredContent).toMatchObject({ status: 'ready' });
   const unconfigured = await prepare(await connect(), { date: madridDate(10) });
   expect(unconfigured.structuredContent).toMatchObject({ status: 'ready' });
 });
 
 test('rejects an invalid booking window configuration at startup', async () => {
-  for (const value of ['{"sample-gym":0}', '{"sample-gym":7.5}', '[7]', 'seven']) {
+  for (const value of ['0', '7.5', '61', '[7]', 'seven']) {
     await expect(connect({ AIMHARDER_BOOKING_WINDOW_DAYS: value })).rejects.toMatchObject({ code: 'INVALID_BOOKING_WINDOW_CONFIGURATION' });
   }
+  await expect(connect({ AIMHARDER_BOOKING_WINDOW_DAYS: '{"sample-gym":7}' })).rejects.toMatchObject({ code: 'LEGACY_CONFIGURATION' });
 });

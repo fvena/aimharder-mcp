@@ -39,7 +39,7 @@ const classSourceNotice = (source: 'request' | 'configured') => source === 'conf
 /** The workout class to read: the requested one, else the gym's configured default, else none. */
 function resolveWorkoutClass(ctx: Context, gymId: string, requested: string | undefined) {
   if (requested !== undefined) return { className: requested, classSource: 'request' as const };
-  const configured = ctx.preferences.atGym(gymId).workoutClass;
+  const configured = ctx.preferences.workoutClass;
   return { className: configured, classSource: configured === null ? null : 'configured' as const };
 }
 
@@ -51,7 +51,7 @@ export function getPublishedWorkouts(ctx: Context, input: WorkoutQuery) {
   const parsed = workoutQuerySchema.safeParse(input);
   if (!parsed.success) return Promise.reject(new AimHarderError('INVALID_WORKOUT_QUERY'));
   const query = parsed.data;
-  return ctx.upstream.withGym(query.gymId, async (session) => {
+  return ctx.upstream.withGym(async (session) => {
     const { gym } = session;
     const { className, classSource } = resolveWorkoutClass(ctx, gym.id, query.className);
     const publisher = await session.publisher();
@@ -73,7 +73,7 @@ export function getPublishedWorkoutsRange(ctx: Context, input: WorkoutRangeQuery
   const parsed = workoutRangeQuerySchema.safeParse(input);
   if (!parsed.success) return Promise.reject(new AimHarderError('INVALID_WORKOUT_QUERY'));
   const query = parsed.data;
-  return ctx.upstream.withGym(query.gymId, async (session) => {
+  return ctx.upstream.withGym(async (session) => {
     const { gym } = session;
     const { className, classSource } = resolveWorkoutClass(ctx, gym.id, query.className);
     const publisher = await session.publisher();

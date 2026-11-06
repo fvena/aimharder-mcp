@@ -23,7 +23,7 @@ export function getClassSessions(ctx: Context, input: ClassQuery): Promise<Class
   const parsed = classQuerySchema.safeParse(input);
   if (!parsed.success) return Promise.reject(new AimHarderError('INVALID_CLASS_QUERY'));
   const query = parsed.data;
-  return ctx.upstream.withGym(query.gymId, 'box', async (session) => {
+  return ctx.upstream.withGym('box', async (session) => {
     const { gym, boxId } = session;
     const sessions: ClassSession[] = [];
     for (const date of calendarDates(query.startDate, query.endDate)) {
@@ -34,7 +34,7 @@ export function getClassSessions(ctx: Context, input: ClassQuery): Promise<Class
         (query.startTime === undefined || session.startTime === query.startTime)
         && (query.className === undefined || session.classType.name === query.className)));
     }
-    const windowDays = ctx.preferences.atGym(gym.id).bookingWindowDays;
+    const windowDays = ctx.preferences.bookingWindowDays;
     if (windowDays !== undefined) for (const session of sessions) Object.assign(session, bookingWindow(session.date, session.startTime, gym.timeZone, windowDays));
     return {
       gym, startDate: query.startDate, endDate: query.endDate, coverage: 'complete', sessions,
@@ -53,7 +53,7 @@ export function getClassParticipants(ctx: Context, input: ParticipantsQuery) {
   const parsed = participantsQuerySchema.safeParse(input);
   if (!parsed.success) return Promise.reject(new AimHarderError('INVALID_PARTICIPANTS_QUERY'));
   const query = parsed.data;
-  return ctx.upstream.withGym(query.gymId, 'box', async (session) => {
+  return ctx.upstream.withGym('box', async (session) => {
     const { gym, boxId } = session;
     const sessions = parseClassDay(await session.read({ kind: 'schedule', boxId, date: query.date }), gym.id, query.date, gym.timeZone)
       .filter(row => row.classType.name === query.className && row.startTime === query.startTime);

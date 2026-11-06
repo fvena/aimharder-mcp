@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { CookieJar } from 'tough-cookie';
 import { z } from 'zod';
 import { AppApiSession, appIdentity, type AppRequest } from './app-api.js';
-import { gymIdSchema, type Configuration } from './config.js';
+import type { Configuration } from './config.js';
 import { AimHarderError } from './errors.js';
 import { readResponse } from './http.js';
 
@@ -38,9 +38,8 @@ export type WriteOperation =
   | { kind: 'save-result'; form: Record<string, string> }
   | { kind: 'delete-activity'; id: number };
 
-/** What a query receives for its selected gym. */
+/** What a query receives for the account holder's gym. */
 export interface GymSession {
-  gyms: AccessibleGym[];
   gym: Gym;
   boxId: number | undefined;
   accountId: number;
@@ -87,29 +86,34 @@ export class AimHarderUpstream {
   }
 
   /**
-   * Run one query for the selected gym (`gymId`, else the configured default, else the only gym).
+   * Run one query for the account holder's gym: the chosen one, else the only one (several and none chosen: GYM_REQUIRED).
    * A requirement is checked before `work` runs: `box` needs the gym's box ID (else INVALID_RESPONSE), `confirmed-zone`
    * also needs a user-confirmed time zone (else CONFIRMED_GYM_TIME_ZONE_REQUIRED).
    * Queries are serialized so a session renewal cannot replace another query's session.
    */
-  withGym<T>(gymId: string | undefined, work: (session: GymSession) => Promise<T>): Promise<T>;
-  withGym<T>(gymId: string | undefined, requirement: 'box', work: (session: BoxSession) => Promise<T>): Promise<T>;
-  withGym<T>(gymId: string | undefined, requirement: 'confirmed-zone', work: (session: ConfirmedSession) => Promise<T>): Promise<T>;
-  withGym<T>(gymId: string | undefined, ...args: [(session: GymSession) => Promise<T>] | [GymRequirement, (session: never) => Promise<T>]): Promise<T> {
+  withGym<T>(work: (session: GymSession) => Promise<T>): Promise<T>;
+  withGym<T>(requirement: 'box', work: (session: BoxSession) => Promise<T>): Promise<T>;
+  withGym<T>(requirement: 'confirmed-zone', work: (session: ConfirmedSession) => Promise<T>): Promise<T>;
+  withGym<T>(...args: [(session: GymSession) => Promise<T>] | [GymRequirement, (session: never) => Promise<T>]): Promise<T> {
     const [requirement, work] = args.length === 1 ? [undefined, args[0]] : args;
-    return this.#enqueue(() => this.#run(gymId, (session) => {
+    return this.#enqueue(() => this.#run((gyms, canRenew) => {
+      const session = this.#session(this.#select(gyms), canRenew);
       if (requirement === 'confirmed-zone' && session.gym.timeZoneStatus !== 'user-confirmed') throw new AimHarderError('CONFIRMED_GYM_TIME_ZONE_REQUIRED');
       if (requirement !== undefined && session.boxId === undefined) throw new AimHarderError('INVALID_RESPONSE');
       return (work as (session: GymSession) => Promise<T>)(session);
-    }, true));
+    }));
   }
 
   /**
-   * Sign in and report the AimHarder account ID and its active gyms, without selecting one.
-   * `includeInactive` also lists the gyms the server does not use (to choose them).
+   * Sign in and report the AimHarder account ID, all its gyms (to choose one) and the account holder's gym: undefined
+   * when there are several and none is chosen, or the chosen one is no longer the account's.
    */
-  account(includeInactive = false): Promise<{ accountId: number; gyms: Gym[] }> {
-    return this.#enqueue(() => this.#run(undefined, async (session) => ({ accountId: session.accountId, gyms: session.gyms.map(({ gym }) => gym) }), false, includeInactive));
+  account(): Promise<{ accountId: number; gyms: Gym[]; gym: Gym | undefined }> {
+    return this.#enqueue(() => this.#run(async (gyms) => {
+      let gym: Gym | undefined;
+      try { gym = this.#select(gyms).gym; } catch { gym = undefined; }
+      return { accountId: this.#accountId!, gyms: gyms.map((entry) => entry.gym), gym };
+    }));
   }
 
   #enqueue<T>(run: () => Promise<T>): Promise<T> {
@@ -118,15 +122,13 @@ export class AimHarderUpstream {
     return result;
   }
 
-  async #run<T>(gymId: string | undefined, work: (session: GymSession) => Promise<T>, select: boolean, includeInactive = false): Promise<T> {
+  /** Sign in if needed and run `work` with the account's gyms, renewing an expired session once. */
+  async #run<T>(work: (gyms: AccessibleGym[], canRenew: boolean) => Promise<T>): Promise<T> {
     if (this.#authenticationFailure) throw this.#authenticationFailure;
-    if (gymId !== undefined && !gymIdSchema.safeParse(gymId).success) throw new AimHarderError('GYM_NOT_ACCESSIBLE');
     if (this.#accountId === undefined) await this.#authenticate();
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
-        const gyms = await this.#discoverGyms(includeInactive);
-        const selected = select ? this.#select(gyms, gymId) : gyms[0]!;
-        return await work(this.#session(gyms, selected, attempt === 0));
+        return await work(await this.#discoverGyms(), attempt === 0);
       } catch (error) {
         if (!(error instanceof SessionExpired)) throw error;
         this.#clearSession();
@@ -137,16 +139,17 @@ export class AimHarderUpstream {
     throw new AimHarderError('SESSION_EXPIRED');
   }
 
-  #select(gyms: AccessibleGym[], gymId: string | undefined) {
-    const configured = this.configuration.defaultGym;
-    if (configured !== undefined && !gyms.some(({ gym }) => gym.id === configured)) throw new AimHarderError('GYM_NOT_ACCESSIBLE', gyms.map(({ gym }) => gym.id));
-    if (gyms.length > 1 && configured === undefined) throw new AimHarderError('DEFAULT_GYM_REQUIRED', gyms.map(({ gym }) => gym.id));
-    const selected = gyms.find(({ gym }) => gym.id === (gymId ?? configured ?? gyms[0]?.gym.id));
-    if (!selected) throw new AimHarderError('GYM_NOT_ACCESSIBLE');
-    return selected;
+  /** The account holder's gym, with the time zone they confirmed for it (else Europe/Madrid, assumed). */
+  #select(gyms: AccessibleGym[]): AccessibleGym {
+    const chosen = this.configuration.gym;
+    if (chosen === undefined && gyms.length > 1) throw new AimHarderError('GYM_REQUIRED', gyms.map(({ gym }) => gym.id));
+    const selected = chosen === undefined ? gyms[0] : gyms.find(({ gym }) => gym.id === chosen);
+    if (!selected) throw new AimHarderError('GYM_NOT_ACCESSIBLE', gyms.map(({ gym }) => gym.id));
+    const zone = this.configuration.timeZone;
+    return zone === undefined ? selected : { ...selected, gym: { ...selected.gym, timeZone: zone, timeZoneStatus: 'user-confirmed' } };
   }
 
-  #session(gyms: AccessibleGym[], selected: AccessibleGym, canRenew: boolean): GymSession {
+  #session(selected: AccessibleGym, canRenew: boolean): GymSession {
     const accountId = this.#accountId!;
     let renewalAvailable = canRenew;
     // Renew the web session once per query, then confirm the same account, gym and box before continuing.
@@ -164,7 +167,7 @@ export class AimHarderUpstream {
       if (this.#accountId !== accountId) { this.#clearSession(); throw new AimHarderError('IDENTITY_MISMATCH'); }
     };
     return {
-      gyms, gym: selected.gym, boxId: selected.boxId, accountId,
+      gym: selected.gym, boxId: selected.boxId, accountId,
       read: async (operation) => {
         try { return await this.#read(operation); }
         catch (error) {
@@ -269,8 +272,8 @@ export class AimHarderUpstream {
     }
   }
 
-  /** The account's gyms, limited to the server's active gyms unless `includeInactive`. */
-  async #discoverGyms(includeInactive = false): Promise<AccessibleGym[]> {
+  /** The account's gyms, each with Europe/Madrid assumed as its zone. */
+  async #discoverGyms(): Promise<AccessibleGym[]> {
     const parsed = identitySchema.safeParse(await this.#web(identityUrl));
     if (!parsed.success) throw new AimHarderError('INVALID_RESPONSE');
     const account = parsed.data.data[0];
@@ -284,16 +287,10 @@ export class AimHarderUpstream {
       if (role.role !== 'client') throw new AimHarderError('UNSUPPORTED_MEMBERSHIP');
       const previous = gyms.get(role.centre_url);
       if (previous && (previous.gym.name !== role.gym || previous.boxId !== role.boid)) throw new AimHarderError('INVALID_RESPONSE');
-      const configuredTimeZone = Object.hasOwn(this.configuration.gymTimeZones, role.centre_url) ? this.configuration.gymTimeZones[role.centre_url] : undefined;
-      gyms.set(role.centre_url, {
-        gym: { id: role.centre_url, name: role.gym, timeZone: configuredTimeZone ?? 'Europe/Madrid', timeZoneStatus: configuredTimeZone ? 'user-confirmed' : 'assumed' },
-        boxId: role.boid,
-      });
+      gyms.set(role.centre_url, { gym: { id: role.centre_url, name: role.gym, timeZone: 'Europe/Madrid', timeZoneStatus: 'assumed' }, boxId: role.boid });
     }
-    const active = this.configuration.activeGyms;
-    const accessible = [...gyms.values()].filter(({ gym }) => includeInactive || !active?.length || active.includes(gym.id));
-    if (!accessible.length) throw new AimHarderError('NO_ACCESSIBLE_GYMS');
-    return accessible;
+    if (!gyms.size) throw new AimHarderError('NO_ACCESSIBLE_GYMS');
+    return [...gyms.values()];
   }
 
   /** One website request with the session cookie. A login sends `loginBody` as JSON. */

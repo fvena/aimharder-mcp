@@ -37,7 +37,7 @@ afterAll(() => upstream.close());
 async function connect(extra: Record<string, string | undefined> = {}) {
   const server = createServer({
     AIMHARDER_USERNAME: 'account@example.invalid', AIMHARDER_PASSWORD: 'synthetic-password',
-    AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid"}', ...extra,
+    AIMHARDER_TIME_ZONE: 'Europe/Madrid', ...extra,
   });
   const client = new Client({ name: 'booking-behavioral-harness', version: '1.0.0' });
   const [a, b] = InMemoryTransport.createLinkedPair();
@@ -104,7 +104,7 @@ test.each([403, 429, 500])('lookup failure is not no bookings: %s', async (statu
   const result = await query(await connect());expect(result.isError).toBe(true);expect(result.structuredContent).toBeUndefined();
 });
 test('uses the assumed gym zone when no override is configured', async () => {
-  expect((await query(await connect({ AIMHARDER_GYM_TIME_ZONES: undefined }))).structuredContent).toMatchObject({ gym: { timeZone: 'Europe/Madrid', timeZoneStatus: 'assumed' } });
+  expect((await query(await connect({ AIMHARDER_TIME_ZONE: undefined }))).structuredContent).toMatchObject({ gym: { timeZone: 'Europe/Madrid', timeZoneStatus: 'assumed' } });
   expect(bookingRequests()).toHaveLength(1);
 });
 test('rejects unknown gyms and account selectors', async () => {
@@ -124,18 +124,17 @@ test('missing optional class details remain explicitly unknown', async () => {
   respond([booking({ className: undefined })]);
   expect((await query(await connect())).structuredContent).toMatchObject({ bookings: [{ classType: { id: null, name: null } }] });
 });
-test('default and explicit gyms route only through their verified membership', async () => {
+test('the chosen gym among several routes only through its verified membership', async () => {
   upstream.use(http.get('https://aimharder.es/api/whoami', () => HttpResponse.json({ data: [{ id: 42, roles: [membership(), membership('second-gym', 300)] }] })),
     http.get(`${appBase}/nextBookings`, ({ request }) => {
       const box = new URL(request.url).searchParams.get('box');
       return HttpResponse.json({ nextClasses: [booking({ id: box === '300' ? 9002 : 9001 })], history: [] });
     }));
-  const client = await connect({ AIMHARDER_DEFAULT_GYM: 'sample-gym', AIMHARDER_GYM_TIME_ZONES: '{"sample-gym":"Europe/Madrid","second-gym":"Atlantic/Canary"}' });
-  expect((await query(client)).structuredContent).toMatchObject({ gym: { id: 'sample-gym' }, bookings: [{ sourceBookingId: 9001 }] });
-  expect((await query(client, { gymId: 'second-gym' })).structuredContent).toMatchObject({ gym: { id: 'second-gym' }, bookings: [{ sourceBookingId: 9002, timeZone: 'Atlantic/Canary' }] });
-  expect((await query(client)).structuredContent).toMatchObject({ gym: { id: 'sample-gym' } });
+  expect(JSON.stringify(await query(await connect()))).toContain('GYM_REQUIRED');
+  const client = await connect({ AIMHARDER_GYM: 'second-gym', AIMHARDER_TIME_ZONE: 'Atlantic/Canary' });
+  expect((await query(client)).structuredContent).toMatchObject({ gym: { id: 'second-gym' }, bookings: [{ sourceBookingId: 9002, timeZone: 'Atlantic/Canary' }] });
   expect(bookingRequests().every(r => r.method === 'GET' && [...r.url.searchParams.keys()].sort().join() === 'box,token')).toBe(true);
-  expect(bookingRequests().map(r => r.url.searchParams.get('box'))).toEqual(['200', '300', '200']);
+  expect(bookingRequests().map(r => r.url.searchParams.get('box'))).toEqual(['300']);
 });
 test('exhausted recovery stops after two attempts', async () => {
   upstream.use(http.get(`${appBase}/nextBookings`, () => new HttpResponse(null, { status: 401 })));
@@ -144,13 +143,13 @@ test('exhausted recovery stops after two attempts', async () => {
 });
 test('a repeatedly expired app session stops after one app re-login', async () => {
   upstream.use(http.get(`${appBase}/nextBookings`, () => new HttpResponse(null, { status: 401 })));
-  expect(JSON.stringify(await query(await connect(), { gymId: 'sample-gym' }))).toContain('SESSION_EXPIRED');
+  expect(JSON.stringify(await query(await connect()))).toContain('SESSION_EXPIRED');
   expect(bookingRequests()).toHaveLength(2);
   expect(requests.filter(r => r.url.pathname === '/aplic/apiExternal/login')).toHaveLength(2);
 });
 test('membership removed before a query prevents the booking request', async () => {
   upstream.use(http.get('https://aimharder.es/api/whoami', () => HttpResponse.json({ data: [{ id: 42, roles: [membership('second-gym', 300)] }] })));
-  expect(JSON.stringify(await query(await connect(), { gymId: 'sample-gym' }))).toContain('GYM_NOT_ACCESSIBLE');
+  expect(JSON.stringify(await query(await connect({ AIMHARDER_GYM: 'sample-gym' })))).toContain('GYM_NOT_ACCESSIBLE');
   expect(bookingRequests()).toHaveLength(0);
 });
 test('identity mismatch prevents booking lookup', async () => {
